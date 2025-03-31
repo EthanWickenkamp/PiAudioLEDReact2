@@ -1,0 +1,12 @@
+
+services:
+  audio-processor:
+    build: .
+    privileged: true  # Needed for /dev/snd and Bluetooth
+    network_mode: "host"  # Required for Bluetooth discovery
+    volumes:
+      - /run/dbus:/run/dbus
+      - /dev/snd:/dev/snd
+      - /etc/machine-id:/etc/machine-id
+    environment:
+      - PULSE_RUNTIME_PATH=/run/pulse
