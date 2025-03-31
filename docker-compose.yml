@@ -2,6 +2,7 @@
 services:
   audio-processor:
     build: .
+    container_name: PiAudio2
     privileged: true  # Needed for /dev/snd and Bluetooth
     network_mode: "host"  # Required for Bluetooth discovery
     volumes:
