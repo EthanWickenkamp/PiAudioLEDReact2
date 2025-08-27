@@ -34,17 +34,10 @@ ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # analog jack on many Pi 3 setups
 bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
 
 
-# Power on and make discoverable
+bt-agent -c NoInputNoOutput -p /org/bluez/agent &
 bluetoothctl power on
-bluetoothctl discoverable on
 bluetoothctl pairable on
-
-
-# Start auto-pairing agent and make it the default
-bluetoothctl <<'EOF'
-agent NoInputNoOutput
-default-agent
-EOF
+bluetoothctl discoverable on
 
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
