@@ -6,8 +6,8 @@ services:
     restart: unless-stopped
     network_mode: host
     privileged: true
-    # devices:
-    #   - /dev/snd
+    devices:
+      - /dev/snd
     volumes:
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     environment:
