@@ -23,21 +23,24 @@ rfkill unblock bluetooth
 
 # Start Bluetooth daemon
 bluetoothd -n &
+for i in {1..40}; do busctl --system get-name-owner org.bluez >/dev/null 2>&1 && break || sleep 0.25; done
 echo "Started bluetoothd with PID $!"
 sleep 3
 
-# Register A2DP Sink with BlueZ
-bluealsa -p a2dp-sink &
 
-# Pick ALSA output (set ALSA_OUT in compose/env if you like)
-ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # analog jack on many Pi 3 setups
-bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
-
-
-bt-agent -c NoInputNoOutput -p /org/bluez/agent &
+bt-agent -c NoInputNoOutput &   
 bluetoothctl power on
 bluetoothctl pairable on
 bluetoothctl discoverable on
+
+# 4) Start BlueALSA and wait for org.bluealsa
+bluealsa -p a2dp-sink &
+for i in {1..40}; do busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 && break || sleep 0.25; done
+
+# 5) Bridge to your ALSA output
+ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # set to your DAC (check with: aplay -l / -L)
+bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
+
 
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
