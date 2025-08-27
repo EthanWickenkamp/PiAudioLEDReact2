@@ -36,6 +36,7 @@ def process(indata, frames, time, status):
         pass
 
 def main():
+    print(sd.query_devices())
     print(f"[analyzer] input={DEVICE} rate={RATE} frame={FRAME} → {HOST}:{PORT}")
     with sd.InputStream(blocksize=FRAME, callback=process):
         import time
