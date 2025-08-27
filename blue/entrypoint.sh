@@ -47,6 +47,7 @@ bluetoothctl discoverable on
 AGENT_PID=$!
 log "bt-agent PID: $AGENT_PID"
 
+# Start BlueALSA daemon for A2DP sink, connects BlueZ to ALSA
 bluealsa -p "${BLUEALSA_PROFILES}" &
 BALSA_PID=$!
 log "bluealsa PID: $BALSA_PID"
@@ -58,13 +59,10 @@ log "bluealsa PID: $BALSA_PID"
 # done || true
 # busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 || die "org.bluealsa did not appear"
 
-
-
-
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
 
-
+# Container main process:
 {
   log "Bluetooth event monitor running…"
   # -L to line-buffer so logs appear immediately
@@ -79,11 +77,11 @@ echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
     fi
 
     # (Optional) connection announce — uncomment if you want them:
-    # if [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ yes ]]; then
-    #   echo "🔊 Connected: ${BASH_REMATCH[1]}"
-    # elif [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ no ]]; then
-    #   echo "🔇 Disconnected: ${BASH_REMATCH[1]}"
-    # fi
+    if [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ yes ]]; then
+      echo "🔊 Connected: ${BASH_REMATCH[1]}"
+    elif [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ no ]]; then
+      echo "🔇 Disconnected: ${BASH_REMATCH[1]}"
+    fi
   done
 } &
 
