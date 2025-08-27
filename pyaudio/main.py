@@ -13,27 +13,6 @@ sd.default.dtype = "float32"
 
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 
-def pack_simple(low, mid, high):
-    # 3-band value packed into 3 bytes (expand to MoonModules V2 later)
-    vals = np.clip(np.array([low, mid, high]) * 255, 0, 255).astype(np.uint8)
-    return b"AW\x02" + bytes(vals)  # tiny header + 3 bands
-
-def process(indata, frames, time, status):
-    if status:  # xruns etc.
-        return
-    mono = indata.mean(axis=1)
-    # FFT magnitudes
-    spec = np.fft.rfft(mono * np.hanning(len(mono)))
-    mag = np.abs(spec)
-    freqs = np.fft.rfftfreq(len(mono), 1.0 / RATE)
-    # crude 3-band split
-    low  = np.log1p(mag[(freqs >=  40) & (freqs <  200)]).mean() if mag.size else 0
-    mid  = np.log1p(mag[(freqs >= 200) & (freqs < 2000)]).mean() if mag.size else 0
-    high = np.log1p(mag[(freqs >=2000) & (freqs < 8000)]).mean() if mag.size else 0
-    try:
-        sock.sendto(pack_simple(low, mid, high), (HOST, PORT))
-    except Exception:
-        pass
 
 def main():
     print(sd.query_devices())
