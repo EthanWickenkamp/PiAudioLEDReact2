@@ -1,10 +1,27 @@
 #!/bin/bash
 set -e
 
+# Helper function die() print X and error message, then exit with status 1
+die(){ echo "✖ $*" >&2; exit 1; }
+# Helper function log() to print checkmark and message
+log(){ echo "▶ $*"; }
+
 echo "Starting Bluetooth pairing setup..."
 
 # Use host D-Bus (don't start our own)
-export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
+# export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
+
+# Test if -S for socket exists, otherwise use die() with error message
+[[ -S /run/dbus/system_bus_socket ]] || die "Host D-Bus socket missing"
+echo "Using host D-Bus at /run/dbus/system_bus_socket"
+
+# Print BlueZ daemon version or unknown if fails
+echo "bluez: $(bluetoothd -v 2>/dev/null || echo unknown)"
+
+# ensure radio kill switches is not blocking bluetooth
+rfkill unblock bluetooth
+
+
 
 # Start Bluetooth daemon
 bluetoothd &
