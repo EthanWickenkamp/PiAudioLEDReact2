@@ -15,42 +15,89 @@ echo "Starting Bluetooth pairing setup..."
 [[ -S /run/dbus/system_bus_socket ]] || die "Host D-Bus socket missing"
 echo "Using host D-Bus at /run/dbus/system_bus_socket"
 
+# Ensure host bluetoothd is not running (avoid two owners of org.bluez)
+if busctl --system get-name-owner org.bluez >/dev/null 2>&1; then
+  die "Host already has org.bluez owner. Stop/disable host bluetoothd or run without starting bluetoothd here."
+fi
+
 # Print BlueZ daemon version or unknown if fails
 echo "bluez: $(bluetoothd -v 2>/dev/null || echo unknown)"
 
 # ensure radio kill switches is not blocking bluetooth
-rfkill unblock bluetooth
+rfkill unblock bluetooth || true
 
 # Start Bluetooth daemon
 bluetoothd -n &
-for i in {1..40}; do busctl --system get-name-owner org.bluez >/dev/null 2>&1 && break || sleep 0.25; done
-echo "Started bluetoothd with PID $!"
-sleep 3
+BTD_PID=$!
+log "bluetoothd PID: $BTD_PID"
 
+# Wait for org.bluez
+for i in {1..40}; do
+  if busctl --system get-name-owner org.bluez >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done || true
+busctl --system get-name-owner org.bluez >/dev/null 2>&1 || die "org.bluez did not appear"
 
+# Start auto-connect agent and make pairable/discoverable
 bt-agent -c NoInputNoOutput &   
 bluetoothctl power on
 bluetoothctl pairable on
 bluetoothctl discoverable on
+AGENT_PID=$!
+log "bt-agent PID: $AGENT_PID"
 
-# 4) Start BlueALSA and wait for org.bluealsa
-bluealsa -p a2dp-sink &
-for i in {1..40}; do busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 && break || sleep 0.25; done
+bluealsa -p "${BLUEALSA_PROFILES}" &
+BALSA_PID=$!
+log "bluealsa PID: $BALSA_PID"
 
-# 5) Bridge to your ALSA output
-ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # set to your DAC (check with: aplay -l / -L)
-bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
+# Wait for org.bluealsa
+for i in {1..40}; do
+  if busctl --system get-name-owner org.bluealsa >/dev/null 2>&1; then break; fi
+  sleep 0.25
+done || true
+busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 || die "org.bluealsa did not appear"
+
+
 
 
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
 
 
+{
+  log "Bluetooth event monitor running…"
+  # -L to line-buffer so logs appear immediately
+  stdbuf -oL -eL bluetoothctl --monitor 2>/dev/null | \
+  while IFS= read -r line; do
+    # Pairing events:
+    if [[ "$line" =~ Pairing\ successful ]]; then
+      echo "🔔 Pairing successful."
+    elif [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Paired:\ yes ]]; then
+      mac="${BASH_REMATCH[1]}"
+      echo "🔔 Device paired: $mac"
+    fi
+
+    # (Optional) connection announce — uncomment if you want them:
+    # if [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ yes ]]; then
+    #   echo "🔊 Connected: ${BASH_REMATCH[1]}"
+    # elif [[ "$line" =~ Device\ ([A-Fa-f0-9:]{17}).*Connected:\ no ]]; then
+    #   echo "🔇 Disconnected: ${BASH_REMATCH[1]}"
+    # fi
+  done
+} &
+
+# 4) A2DP → ALSA bridge (PID 1). Keeps container running; if it dies, container exits & restarts.
+log "Launching bluealsa-aplay → ${ALSA_OUT}"
+exec bluealsa-aplay --profile-a2dp --pcm="${ALSA_OUT}" --single-audio -v
 
 
 
+# # 5) Bridge to your ALSA output
+# ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # set to your DAC (check with: aplay -l / -L)
+# bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
 
-# Keep container running and show connection events
+
+# # Keep container running and show connection events
 # echo "Monitoring Bluetooth events..."
 # while true; do
 #     echo "Starting monitor loop..."

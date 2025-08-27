@@ -10,7 +10,9 @@ services:
     #   - /dev/snd
     volumes:
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
-    # environment:
+    environment:
+      ALSA_OUT: "plughw:CARD=BossDAC,DEV=0"   # we’ll fix after we inspect your aplay -L
+      BLUEALSA_PROFILES: "a2dp-sink"
 
     
 
