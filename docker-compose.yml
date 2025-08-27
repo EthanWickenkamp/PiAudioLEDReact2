@@ -11,15 +11,15 @@ services:
     volumes:
      - /etc/bluetooth:/conf
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
-    environment:
+    # environment:
     
 
-  app:
-    build: ./app
-    container_name: app
-    network_mode: host
-    restart: unless-stopped
-    # privileged: true
-    # devices:
-    # volumes:
-    # environment:
+  # app:
+  #   build: ./app
+  #   container_name: app
+  #   network_mode: host
+  #   restart: unless-stopped
+  #   privileged: true
+  #   devices:
+  #   volumes:
+  #   environment:
