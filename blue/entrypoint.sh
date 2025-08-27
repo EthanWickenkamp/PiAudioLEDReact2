@@ -26,10 +26,10 @@ bluetoothd &
 echo "Started bluetoothd with PID $!"
 sleep 3
 
-# Power on and make discoverable, done in main.conf now
-# bluetoothctl power on
-# bluetoothctl discoverable on
-# bluetoothctl pairable on
+# Power on and make discoverable
+bluetoothctl power on
+bluetoothctl discoverable on
+bluetoothctl pairable on
 
 # Start auto-pairing agent
 bt-agent -c NoInputNoOutput &
