@@ -1,25 +1,22 @@
 services:
 
   audio-bridge:
-      image: debian:stable-slim
+      build: ./bridge
+      container_name: audiobridge
+      restart: unless-stopped
       network_mode: host
       privileged: true              # for modprobe (or cap_add: [SYS_MODULE])
       devices:
         - /dev/snd:/dev/snd
       environment:
-        IN_PCM:  "hw:Loopback,1,0"      # read from tap
-        OUT_PCM: "plughw:BossDAC,0"     # write to DAC (format-safe)
+        IN_PCM:  "hw:Loopback,1,0"            # read from tap
+        OUT_PCM: "plughw:BossDAC,0"           # write to DAC
         RATE:    "44100"
         PERIOD:  "256"
         FRAGS:   "3"
-      command: >
-        sh -c '
-          modprobe snd-aloop index=9 id=Loopback pcm_substreams=2 || true;
-          for i in $(seq 1 60); do [ -e /proc/asound/Loopback ] && break; sleep 0.3; done;
-          apt-get update && apt-get install -y --no-install-recommends alsa-utils;
-          exec alsaloop -C "$IN_PCM" -P "$OUT_PCM" -r "$RATE" -p "$PERIOD" -n "$FRAGS"
-        '
-      restart: unless-stopped
+        ALOOP_INDEX: "9"
+        ALOOP_ID: "Loopback"
+        ALOOP_SUBS: "2"
 
   bluetooth:
     build: ./blue
@@ -29,7 +26,7 @@ services:
     network_mode: host
     privileged: true
     devices:
-      - /dev/snd
+      - /dev/snd:/dev/snd
     volumes:
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     environment:
@@ -43,7 +40,7 @@ services:
     restart: unless-stopped   
     network_mode: host
     devices:
-      - /dev/snd
+      - /dev/snd:/dev/snd
     # volumes:
     environment:
       INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
