@@ -3,7 +3,7 @@ FROM debian:bookworm-slim
 
 # Install necessary packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    bluez dbus rfkill \
+    bluez bluez-tools dbus rfkill \
  && rm -rf /var/lib/apt/lists/*
 
 # Set working directory and copy entrypoint script onto host
