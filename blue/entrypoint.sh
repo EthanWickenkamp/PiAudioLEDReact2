@@ -25,6 +25,7 @@ rfkill unblock bluetooth
 
 # Start Bluetooth daemon
 bluetoothd &
+echo "Started bluetoothd with PID $!"
 sleep 3
 
 # Power on and make discoverable
