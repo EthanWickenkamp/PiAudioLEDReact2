@@ -22,4 +22,13 @@ echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
 
 # Keep container running and show connection events
-bluetoothctl --monitor
+echo "Monitoring Bluetooth events..."
+while true; do
+    bluetoothctl --monitor &
+    MONITOR_PID=$!
+    
+    # If monitor exits, restart it
+    wait $MONITOR_PID
+    echo "Monitor restarted..."
+    sleep 2
+done
