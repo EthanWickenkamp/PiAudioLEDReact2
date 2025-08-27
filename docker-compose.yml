@@ -22,7 +22,7 @@ services:
     build: ./blue
     container_name: bluetooth
     depends_on: [audio-bridge]
-    restart: unless-stopped
+    # restart: unless-stopped
     network_mode: host
     privileged: true
     devices:
