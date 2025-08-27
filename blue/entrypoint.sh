@@ -1,35 +1,27 @@
-#!/usr/bin/env bash
-set -euo pipefail
 
-# Talk to the host's system bus
-export DBUS_SYSTEM_BUS_ADDRESS=${DBUS_SYSTEM_BUS_ADDRESS:-unix:path=/run/dbus/system_bus_socket}
+#!/bin/bash
+set -e
 
-# Make sure BT isn't soft-blocked
-rfkill unblock bluetooth || true
+echo "Starting minimal Bluetooth pairing setup..."
 
-# Power adapter on (short-lived call is fine)
-bluetoothctl power on || true
+# Start D-Bus
+mkdir -p /var/run/dbus
+dbus-daemon --system --fork
 
-# Start a long-lived agent that auto-accepts pairing (no PIN)
-# (bluez-tools provides bt-agent)
+# Start Bluetooth daemon
+bluetoothd &
+sleep 3
+
+# Power on and make discoverable
+bluetoothctl power on
+bluetoothctl discoverable on
+bluetoothctl pairable on
+
+# Start auto-pairing agent
 bt-agent -c NoInputNoOutput &
-AGENT_PID=$!
-echo "[btctl] bt-agent started (pid=$AGENT_PID)"
 
-# Make the Pi discoverable & pairable
-bluetoothctl discoverable on || true
-bluetoothctl pairable on || true
-bluetoothctl connectable on || true
+echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
+echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
 
-echo "[btctl] Ready for pairing. Open Bluetooth on your phone and select the Pi."
-
-# (Optional) auto-trust any device that connects
-bluetoothctl --monitor | while read -r line; do
-  # e.g., "Device AA:BB:CC:DD:EE:FF Connected: yes"
-  if [[ "$line" =~ ^Device\ ([A-F0-9:]{17})\ Connected:\ yes$ ]]; then
-    mac="${BASH_REMATCH[1]}"
-    echo "[btctl] Auto-trusting $mac"
-    bluetoothctl trust "$mac" || true
-  fi
-done
-
+# Keep container running and show connection events
+bluetoothctl --monitor
