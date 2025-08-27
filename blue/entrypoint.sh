@@ -32,10 +32,7 @@ sleep 3
 # bluetoothctl pairable on
 
 # Start auto-pairing agent
-bluetoothctl <<'EOF'
-agent NoInputNoOutput
-default-agent
-EOF
+bt-agent -c NoInputNoOutput &
 
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
