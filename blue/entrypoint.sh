@@ -1,12 +1,10 @@
-
 #!/bin/bash
 set -e
 
 echo "Starting minimal Bluetooth pairing setup..."
 
-# Start D-Bus
-mkdir -p /var/run/dbus
-dbus-daemon --system --fork
+# Use host D-Bus (don't start our own)
+export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
 
 # Start Bluetooth daemon
 bluetoothd &
