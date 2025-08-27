@@ -32,11 +32,11 @@ BTD_PID=$!
 log "bluetoothd PID: $BTD_PID"
 
 # Wait for org.bluez
-for i in {1..40}; do
-  if busctl --system get-name-owner org.bluez >/dev/null 2>&1; then break; fi
-  sleep 2
-done || true
-busctl --system get-name-owner org.bluez >/dev/null 2>&1 || die "org.bluez did not appear"
+# for i in {1..40}; do
+#   if busctl --system get-name-owner org.bluez >/dev/null 2>&1; then break; fi
+#   sleep 2
+# done || true
+# busctl --system get-name-owner org.bluez >/dev/null 2>&1 || die "org.bluez did not appear"
 
 # Start auto-connect agent and make pairable/discoverable
 bt-agent -c NoInputNoOutput &   
@@ -51,11 +51,11 @@ BALSA_PID=$!
 log "bluealsa PID: $BALSA_PID"
 
 # Wait for org.bluealsa
-for i in {1..40}; do
-  if busctl --system get-name-owner org.bluealsa >/dev/null 2>&1; then break; fi
-  sleep 2
-done || true
-busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 || die "org.bluealsa did not appear"
+# for i in {1..40}; do
+#   if busctl --system get-name-owner org.bluealsa >/dev/null 2>&1; then break; fi
+#   sleep 2
+# done || true
+# busctl --system get-name-owner org.bluealsa >/dev/null 2>&1 || die "org.bluealsa did not appear"
 
 
 
