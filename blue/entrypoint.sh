@@ -31,15 +31,31 @@ bluetoothctl power on
 bluetoothctl discoverable on
 bluetoothctl pairable on
 
-# Start auto-pairing agent
+
+# 1) Start BlueALSA and register the A2DP sink endpoint with BlueZ
+bluealsa -p a2dp-sink &
+
+# 2) Pick an ALSA output (list with: aplay -l ; aplay -L)
+ALSA_OUT=${ALSA_OUT:-default}   # or "plughw:0,0" for analog jack, or your HDMI pcm
+
+# 3) Bridge BT audio -> ALSA device (autoplays from any connected phone)
+bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
+
+
+
+# Start auto-pairing agent and make it the default
 bluetoothctl <<'EOF'
 agent NoInputNoOutput
 default-agent
 EOF
 
-
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
+
+
+
+
+
 
 # Keep container running and show connection events
 echo "Monitoring Bluetooth events..."
