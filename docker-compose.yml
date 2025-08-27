@@ -19,8 +19,7 @@ services:
     container_name: app
     network_mode: host
     restart: unless-stopped
-    privileged: true
-    devices:
-    volumes:
-
-    environment:
+    # privileged: true
+    # devices:
+    # volumes:
+    # environment:
