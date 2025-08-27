@@ -2,7 +2,7 @@ services:
 
   audio-bridge:
       build: ./bridge
-      container_name: audiobridge
+      container_name: audio-bridge
       restart: unless-stopped
       network_mode: host
       privileged: true              # for modprobe (or cap_add: [SYS_MODULE])
