@@ -22,25 +22,22 @@ echo "bluez: $(bluetoothd -v 2>/dev/null || echo unknown)"
 rfkill unblock bluetooth
 
 # Start Bluetooth daemon
-bluetoothd &
+bluetoothd -n &
 echo "Started bluetoothd with PID $!"
 sleep 3
+
+# Register A2DP Sink with BlueZ
+bluealsa -p a2dp-sink &
+
+# Pick ALSA output (set ALSA_OUT in compose/env if you like)
+ALSA_OUT=${ALSA_OUT:-plughw:0,0}   # analog jack on many Pi 3 setups
+bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
+
 
 # Power on and make discoverable
 bluetoothctl power on
 bluetoothctl discoverable on
 bluetoothctl pairable on
-
-
-# 1) Start BlueALSA and register the A2DP sink endpoint with BlueZ
-bluealsa -p a2dp-sink &
-
-# 2) Pick an ALSA output (list with: aplay -l ; aplay -L)
-ALSA_OUT=${ALSA_OUT:-default}   # or "plughw:0,0" for analog jack, or your HDMI pcm
-
-# 3) Bridge BT audio -> ALSA device (autoplays from any connected phone)
-bluealsa-aplay --profile-a2dp --pcm="$ALSA_OUT" --single-audio -v &
-
 
 
 # Start auto-pairing agent and make it the default
