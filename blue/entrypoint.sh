@@ -30,6 +30,7 @@ rfkill unblock bluetooth || true
 bluetoothd -n &
 BTD_PID=$!
 log "bluetoothd PID: $BTD_PID"
+sleep 3
 
 # Wait for org.bluez
 # for i in {1..40}; do
