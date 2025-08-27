@@ -36,18 +36,19 @@ services:
       ALSA_OUT: "hw:Loopback,0,0"   # write into tap
       BLUEALSA_PROFILES: "a2dp-sink"
 
-    audio-processor:
-      build: ./pyaudio
-      container_name: audio-processor
-      depends_on: [audio-bridge]
-      network_mode: host
-      devices:
-        - /dev/snd
-      # volumes:
-      environment:
-        INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
-        SAMPLE_RATE: "44100"
-        FRAME_SIZE: "1024"
-        WLED_HOST: "192.168.50.123"
-        WLED_PORT: "21324"
-      restart: unless-stopped    
+  audio-processor:
+    build: ./pyaudio
+    container_name: audio-processor
+    depends_on: [audio-bridge]
+    restart: unless-stopped   
+    network_mode: host
+    devices:
+      - /dev/snd
+    # volumes:
+    environment:
+      INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
+      SAMPLE_RATE: "44100"
+      FRAME_SIZE: "1024"
+      WLED_HOST: "192.168.50.123"
+      WLED_PORT: "21324"
+ 
