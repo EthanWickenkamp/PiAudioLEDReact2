@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # Copy repo config files to container
-#COPY etc-bluetooth/ /etc/bluetooth/
+COPY etc-bluetooth/ /etc/bluetooth/
 
 # Set working directory and copy entrypoint script onto host
 WORKDIR /app
