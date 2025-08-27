@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-echo "Starting minimal Bluetooth pairing setup..."
+echo "Starting Bluetooth pairing setup..."
 
 # Use host D-Bus (don't start our own)
 export DBUS_SYSTEM_BUS_ADDRESS="unix:path=/run/dbus/system_bus_socket"
