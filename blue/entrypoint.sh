@@ -32,7 +32,11 @@ bluetoothctl discoverable on
 bluetoothctl pairable on
 
 # Start auto-pairing agent
-bt-agent -c NoInputNoOutput &
+bluetoothctl <<'EOF'
+agent NoInputNoOutput
+default-agent
+EOF
+
 
 echo "Ready for pairing! Look for this device in iPhone Bluetooth settings."
 echo "Device should appear as: $(bluetoothctl show | grep Name | cut -d: -f2)"
