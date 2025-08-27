@@ -6,10 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     bluez bluez-tools dbus rfkill \
  && rm -rf /var/lib/apt/lists/*
 
+# Copy repo config files to container
+#COPY etc-bluetooth/ /etc/bluetooth/
+
 # Set working directory and copy entrypoint script onto host
 WORKDIR /app
 COPY entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
+
 
 # Run the entrypoint script on startup
 ENTRYPOINT ["/usr/bin/env", "bash", "/usr/local/bin/entrypoint.sh"]

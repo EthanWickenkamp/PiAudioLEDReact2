@@ -9,7 +9,6 @@ services:
     # devices:
     #   - /dev/snd
     volumes:
-     - /etc/bluetooth:/conf
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     # environment:
 
