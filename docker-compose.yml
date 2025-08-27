@@ -11,7 +11,8 @@ services:
     volumes:
      - /etc/bluetooth:/conf
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
-    # environment:
+    environment:
+     - BT_MAC=C6:EE:74:B2:BD:18
     
 
   # app:
