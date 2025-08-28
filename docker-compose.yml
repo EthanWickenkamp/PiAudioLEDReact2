@@ -17,11 +17,19 @@ services:
         ALOOP_INDEX: "9"
         ALOOP_ID: "Loopback"
         ALOOP_SUBS: "2"
+        healthcheck:
+          test: ["CMD-SHELL", "aplay -l | grep -q Loopback || exit 1"]
+          interval: 5s
+          timeout: 3s
+          retries: 6
+          start_period: 10s
 
   bluetooth:
     build: ./blue
     container_name: bluetooth
-    depends_on: [audio-bridge]
+    depends_on: 
+      audio-bridge:
+        condition: service_healthy
     # restart: unless-stopped
     network_mode: host
     privileged: true
@@ -36,7 +44,9 @@ services:
   audio-processor:
     build: ./pyaudio
     container_name: audio-processor
-    depends_on: [audio-bridge]
+    depends_on: 
+      audio-bridge:
+        condition: service_healthy
     restart: unless-stopped   
     network_mode: host
     devices:
