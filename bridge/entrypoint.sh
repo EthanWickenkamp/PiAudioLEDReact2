@@ -1,8 +1,10 @@
 #!/bin/ash
 set -e
 
+sleep 2   # wait a bit for ALSA on host to settle
 echo "▶ Loading snd-aloop (index=${ALOOP_INDEX}, id=${ALOOP_ID}, subs=${ALOOP_SUBS})"
 /sbin/modprobe snd-aloop index=${ALOOP_INDEX} id=${ALOOP_ID} pcm_substreams=${ALOOP_SUBS} || true
+# …then wait for /proc/asound/Loopback and proceed as you already do
 
 echo "▶ Waiting for ALSA Loopback card to appear…"
 for i in $(seq 1 120); do
