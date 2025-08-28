@@ -4,15 +4,6 @@ FROM alpine:3.20
 # kmod = modprobe; alsa-utils = alsaloop, aplay/arecord for debug
 RUN apk add --no-cache kmod alsa-utils
 
-# Runtime env (override via compose if needed)
-ENV IN_PCM="hw:Loopback,1,0" \
-    OUT_PCM="plughw:BossDAC,0" \
-    RATE="44100" \
-    PERIOD="256" \
-    FRAGS="3" \
-    ALOOP_INDEX="9" \
-    ALOOP_ID="Loopback" \
-    ALOOP_SUBS="2"
 
 # Simple entrypoint that:
 # 1) loads snd-aloop in host kernel

@@ -1,54 +1,71 @@
 #!/bin/ash
-set -euo pipefail
+set -eu
 
-log() { echo "[$(date +%H:%M:%S)] $*"; }
-
+# ---- minimal config (env-overridable) ----
 ALOOP_INDEX="${ALOOP_INDEX:-9}"
 ALOOP_ID="${ALOOP_ID:-Loopback}"
 ALOOP_SUBS="${ALOOP_SUBS:-2}"
 
-IN_PCM="${IN_PCM:-hw:Loopback,1,0}"           # capture (comes from 0,0 writer)
-OUT_PCM="${OUT_PCM:-plughw:BossDAC,0}"        # DAC
-OUT_PCM2="${OUT_PCM2:-}"                      # optional mirror -> MUST be playback, e.g. hw:Loopback,0,1
+# Producer writes to:           hw:${ALOOP_ID},0,0
+# We read (tap) from capture:   hw:${ALOOP_ID},1,0   (wrapped by dsnoop -> loop_tap)
+IN_HW="${IN_HW:-hw:${ALOOP_ID},1,0}"
 
-RATE="${RATE:-44100}"
+# Outputs
+OUT_PCM="${OUT_PCM:-plughw:BossDAC,0}"   # real DAC (change as needed)
+OUT_PCM2="${OUT_PCM2:-}"                 # optional mirror (e.g. hw:${ALOOP_ID},0,1)
+
+RATE="${RATE:-48000}"   # safer @ 48k for BT chains
 PERIOD="${PERIOD:-256}"
 FRAGS="${FRAGS:-3}"
 
-log "▶ Loading snd-aloop (index=${ALOOP_INDEX}, id=${ALOOP_ID}, subs=${ALOOP_SUBS})"
+log() { echo "[$(date +'%H:%M:%S')] $*"; }
+
+# ---- 1) Load loopback on host kernel ----
+log "modprobe snd-aloop index=${ALOOP_INDEX} id=${ALOOP_ID} substreams=${ALOOP_SUBS}"
 /sbin/modprobe snd-aloop index="${ALOOP_INDEX}" id="${ALOOP_ID}" pcm_substreams="${ALOOP_SUBS}" || true
 
-log "▶ Waiting for ALSA Loopback card to appear…"
-for i in $(seq 1 240); do
-  [ -e "/proc/asound/${ALOOP_ID}" ] && break
-  sleep 0.25
+# ---- 2) Wait for the card to appear ----
+log "waiting for /proc/asound/${ALOOP_ID} …"
+i=0
+while [ ! -e "/proc/asound/${ALOOP_ID}" ] && [ $i -lt 80 ]; do
+  i=$((i+1)); sleep 0.25
 done
-[ -e "/proc/asound/${ALOOP_ID}" ] || { echo "✖ Loopback card '${ALOOP_ID}' not found."; exit 3; }
+[ -e "/proc/asound/${ALOOP_ID}" ] || { echo "loopback '${ALOOP_ID}' not found"; exit 3; }
+sleep 1
 
-log "▶ Waiting for subdevice to be ready…"
-sleep 2
+# ---- 3) Create minimal ALSA config INSIDE the container ----
+# Defines a dsnoop tap called 'loop_tap' over the capture end we want to share.
+cat >/etc/asound.conf <<EOF
+pcm.loop_tap {
+  type dsnoop
+  ipc_key 12345
+  slave {
+    pcm "${IN_HW}"
+    channels 2
+    rate ${RATE}
+    period_size ${PERIOD}
+    buffer_size $((PERIOD*FRAGS))
+  }
+}
+EOF
 
-log "▶ ALSA devices:"
+# (Optional): quick visibility
 aplay -l || true
 arecord -l || true
 
-# Handle clean shutdown
+# ---- 4) Start the fan-out(s) from the shared tap ----
 pids=""
-cleanup() {
-  log "▶ Stopping alsaloop(s)…"
-  [ -n "$pids" ] && kill $pids 2>/dev/null || true
-  wait || true
-}
-trap cleanup TERM INT
 
-log "▶ Starting alsaloop: ${IN_PCM} → ${OUT_PCM} @ ${RATE}Hz"
-alsaloop -C "${IN_PCM}" -P "${OUT_PCM}" -r "${RATE}" -p "${PERIOD}" -n "${FRAGS}" -t 10000 -S 75 -v &
+log "alsaloop: loop_tap -> ${OUT_PCM} @ ${RATE}"
+alsaloop -C loop_tap -P "${OUT_PCM}" -r "${RATE}" -p "${PERIOD}" -n "${FRAGS}" -t 10000 -S 75 -v &
 pids="$pids $!"
 
 if [ -n "${OUT_PCM2}" ]; then
-  log "▶ Starting mirror loop: ${IN_PCM} → ${OUT_PCM2} @ ${RATE}Hz"
-  alsaloop -C "${IN_PCM}" -P "${OUT_PCM2}" -r "${RATE}" -t 10000 -S 75 -v &
+  log "alsaloop (mirror): loop_tap -> ${OUT_PCM2} @ ${RATE}"
+  alsaloop -C loop_tap -P "${OUT_PCM2}" -r "${RATE}" -p "${PERIOD}" -n "${FRAGS}" -t 10000 -S 75 -v &
   pids="$pids $!"
 fi
 
+# ---- 5) Wait / clean shutdown ----
+trap 'log "stopping"; [ -n "$pids" ] && kill $pids 2>/dev/null || true; wait || true; exit 0' TERM INT
 wait -n
