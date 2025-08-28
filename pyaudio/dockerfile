@@ -7,23 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libportaudio2 libasound2 \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root user
-RUN useradd -ms /bin/bash app
-USER app
-WORKDIR /home/app
-
 # Python deps
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # App
-COPY main.py .
+COPY . /app
+WORKDIR /app
 
-# Default envs (can be overridden by compose)
-ENV INPUT_DEVICE=hw:Loopback,1,0 \
-    SAMPLE_RATE=44100 \
-    FRAME_SIZE=1024 \
-    WLED_HOST=192.168.50.123 \
-    WLED_PORT=21324
 
-CMD ["python", "main.py"]
+CMD ["python", "test.py"]
