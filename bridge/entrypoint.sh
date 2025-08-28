@@ -32,7 +32,10 @@ done
 sleep 1
 
 
-# 1) Two FIFOs for fan-out
+# 1) Fresh FIFOs (idempotent)
+for p in /tmp/dac /tmp/mirror; do
+  [ -p "$p" ] && rm -f "$p"
+done
 mkfifo /tmp/dac /tmp/mirror
 
 # 2) Start the two sinks
