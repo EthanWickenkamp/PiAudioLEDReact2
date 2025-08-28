@@ -212,8 +212,7 @@ if __name__ == "__main__":
     print("4. You have selected an audio-reactive effect")
     print("5. Device has been rebooted after changing sync settings")
     print()
-    
-    # Allow user to confirm setup
-    input("Press Enter when ready to start testing...")
+    print("Starting tests automatically in 3 seconds...")
+    time.sleep(3)
     
     test_wled_connection()
