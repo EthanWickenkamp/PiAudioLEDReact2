@@ -2,7 +2,7 @@ import os, time, sys
 import numpy as np
 import sounddevice as sd
 
-INPUT_DEVICE = os.getenv('IN_PCM', 'hw:Loopback,1,1')  # we will match this substring
+INPUT_DEVICE = os.getenv('IN_PCM')  # we will match this substring
 SAMPLE_RATE  = int(os.getenv('SAMPLE_RATE', '48000'))
 FRAME_SIZE   = int(os.getenv('FRAME_SIZE', '1024'))
 CHANNELS     = 2
