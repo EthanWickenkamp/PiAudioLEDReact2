@@ -10,12 +10,11 @@ services:
         - /dev/snd
       volumes:
           - /lib/modules:/lib/modules:ro
-          - /proc:/proc
       environment:
         IN_PCM:  "hw:Loopback,1,0"  # read from tap
-        OUT_PCM: "plughw:BossDAC,0" # write to DAC
-        OUT_PCM2: "hw:Loopback,0,1"
-        RATE:    "44100"
+        DAC_PCM: "plughw:BossDAC,0" # write to DAC
+        OUT_PCM: "hw:Loopback,0,1"
+        RATE:    "48000"
         PERIOD:  "256"
         FRAGS:   "3"
         ALOOP_INDEX: "9"
@@ -59,8 +58,8 @@ services:
       - /dev/snd
     # volumes:
     environment:
-      INPUT_DEVICE: "hw:Loopback,1,1"   # read from tap (same as audio-bridge input)
-      SAMPLE_RATE: "44100"
+      IN_PCM: "hw:Loopback,1,1"   # read from tap (same as audio-bridge input)
+      SAMPLE_RATE: "48000"
       FRAME_SIZE: "1024"
       WLED_HOST: "192.168.50.123"
       WLED_PORT: "21324"

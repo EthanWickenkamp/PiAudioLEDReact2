@@ -2,27 +2,24 @@
 set -eu
 
 # ---- minimal config (env-overridable) ----
-ALOOP_INDEX="${ALOOP_INDEX:-9}"
-ALOOP_ID="${ALOOP_ID:-Loopback}"
-ALOOP_SUBS="${ALOOP_SUBS:-2}"
+ALOOP_INDEX="${ALOOP_INDEX}"
+ALOOP_ID="${ALOOP_ID}"
+ALOOP_SUBS="${ALOOP_SUBS}"
 
-# Producer writes to:           hw:${ALOOP_ID},0,0
-# We read (tap) from capture:   hw:${ALOOP_ID},1,0   (wrapped by dsnoop -> loop_tap)
-IN_HW="${IN_HW:-hw:${ALOOP_ID},1,0}"
-
+IN_PCM="${IN_PCM}"   # capture from BT sink tap
 # Outputs
-OUT_PCM="${OUT_PCM:-plughw:BossDAC,0}"   # real DAC (change as needed)
-OUT_PCM2="${OUT_PCM2:-}"                 # optional mirror (e.g. hw:${ALOOP_ID},0,1)
+DAC_PCM="${DAC_PCM}"   # real DAC (change as needed)
+OUT_PCM="${OUT_PCM}"   # optional mirror (e.g. hw:${ALOOP_ID},0,1)
 
 RATE="${RATE:-48000}"   # safer @ 48k for BT chains
 PERIOD="${PERIOD:-256}"
 FRAGS="${FRAGS:-3}"
 
-log() { echo "[$(date +'%H:%M:%S')] $*"; }
 
 # ---- 1) Load loopback on host kernel ----
-log "modprobe snd-aloop index=${ALOOP_INDEX} id=${ALOOP_ID} substreams=${ALOOP_SUBS}"
+log "modprobe snd-aloop index=${ALOOP_INDEX} id=${ALOOP_ID} pcm_substreams=${ALOOP_SUBS}"
 /sbin/modprobe snd-aloop index="${ALOOP_INDEX}" id="${ALOOP_ID}" pcm_substreams="${ALOOP_SUBS}" || true
+
 
 # ---- 2) Wait for the card to appear ----
 log "waiting for /proc/asound/${ALOOP_ID} …"
@@ -32,6 +29,29 @@ while [ ! -e "/proc/asound/${ALOOP_ID}" ] && [ $i -lt 80 ]; do
 done
 [ -e "/proc/asound/${ALOOP_ID}" ] || { echo "loopback '${ALOOP_ID}' not found"; exit 3; }
 sleep 1
+
+
+# 1) Two FIFOs for fan-out
+mkfifo /tmp/dac /tmp/mirror
+
+# 2) Start the two sinks
+aplay -D "${DAC_PCM}" -f S16_LE -r "${RATE}" -c 2 /tmp/dac &
+aplay -D "${OUT_PCM}" -f S16_LE -r "${RATE}" -c 2 /tmp/mirror &
+
+# 3) Single capture → tee to both sinks
+arecord -D "plughw:${IN_PCM#hw:}" -f S16_LE -r "${RATE}" -c 2 \
+  --period-size "${PERIOD}" --buffer-size "$((PERIOD*FRAGS))" \
+| tee /tmp/dac > /tmp/mirror
+
+
+
+
+
+
+
+
+
+
 
 # ---- 3) Create minimal ALSA config INSIDE the container ----
 # Defines a dsnoop tap called 'loop_tap' over the capture end we want to share.
