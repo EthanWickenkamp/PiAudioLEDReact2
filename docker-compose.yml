@@ -1,28 +1,28 @@
 services:
 
-  audio-bridge:
-      build: ./bridge
-      container_name: audio-bridge
-      restart: unless-stopped
-      network_mode: host
-      privileged: true              # for modprobe (or cap_add: [SYS_MODULE])
-      devices:
-        - /dev/snd:/dev/snd
-      environment:
-        IN_PCM:  "hw:Loopback,1,0"            # read from tap
-        OUT_PCM: "plughw:BossDAC,0"           # write to DAC
-        RATE:    "44100"
-        PERIOD:  "256"
-        FRAGS:   "3"
-        ALOOP_INDEX: "9"
-        ALOOP_ID: "Loopback"
-        ALOOP_SUBS: "2"
-      healthcheck:
-        test: ["CMD-SHELL", "aplay -l | grep -q Loopback || exit 1"]
-        interval: 5s
-        timeout: 3s
-        retries: 6
-        start_period: 10s
+  # audio-bridge:
+  #     build: ./bridge
+  #     container_name: audio-bridge
+  #     restart: unless-stopped
+  #     network_mode: host
+  #     privileged: true              # for modprobe (or cap_add: [SYS_MODULE])
+  #     devices:
+  #       - /dev/snd:/dev/snd
+  #     environment:
+  #       IN_PCM:  "hw:Loopback,1,0"            # read from tap
+  #       OUT_PCM: "plughw:BossDAC,0"           # write to DAC
+  #       RATE:    "44100"
+  #       PERIOD:  "256"
+  #       FRAGS:   "3"
+  #       ALOOP_INDEX: "9"
+  #       ALOOP_ID: "Loopback"
+  #       ALOOP_SUBS: "2"
+  #     healthcheck:
+  #       test: ["CMD-SHELL", "aplay -l | grep -q Loopback || exit 1"]
+  #       interval: 5s
+  #       timeout: 3s
+  #       retries: 6
+  #       start_period: 10s
 
   bluetooth:
     build: ./blue
@@ -38,24 +38,25 @@ services:
     volumes:
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     environment:
-      ALSA_OUT: "hw:Loopback,0,0"   # write into tap
+      #ALSA_OUT: "hw:Loopback,0,0"   # write into tap
+      ALSA_OUT: "plughw:CARD=BossDAC,DEV=0" # write to Boss DAC
       BLUEALSA_PROFILES: "a2dp-sink"
 
-  audio-processor:
-    build: ./pyaudio
-    container_name: audio-processor
-    depends_on: 
-      audio-bridge:
-        condition: service_healthy
-    restart: unless-stopped   
-    network_mode: host
-    devices:
-      - /dev/snd:/dev/snd
-    # volumes:
-    environment:
-      INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
-      SAMPLE_RATE: "44100"
-      FRAME_SIZE: "1024"
-      WLED_HOST: "192.168.50.123"
-      WLED_PORT: "21324"
+  # audio-processor:
+  #   build: ./pyaudio
+  #   container_name: audio-processor
+  #   depends_on: 
+  #     audio-bridge:
+  #       condition: service_healthy
+  #   restart: unless-stopped   
+  #   network_mode: host
+  #   devices:
+  #     - /dev/snd:/dev/snd
+  #   # volumes:
+  #   environment:
+  #     INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
+  #     SAMPLE_RATE: "44100"
+  #     FRAME_SIZE: "1024"
+  #     WLED_HOST: "192.168.50.123"
+  #     WLED_PORT: "21324"
  
