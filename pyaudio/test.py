@@ -33,20 +33,69 @@ def find_device_index():
     """Find the device index for our target device"""
     devices = sd.query_devices()
     
-    # Try exact match first
+    print(f"Target device: {INPUT_DEVICE}")
+    
+    # Parse the ALSA device specification
+    # Expected formats: "hw:Loopback,1,0", "hw:9,1,0", "hw:9,1"
+    target_card_name = None
+    target_card_num = None
+    target_device_num = None
+    
+    if "hw:" in INPUT_DEVICE:
+        hw_spec = INPUT_DEVICE.replace("hw:", "").split(",")
+        
+        # First part is card (name or number)
+        if hw_spec[0].isdigit():
+            target_card_num = int(hw_spec[0])
+        else:
+            target_card_name = hw_spec[0]
+        
+        # Second part is device number
+        if len(hw_spec) >= 2 and hw_spec[1].isdigit():
+            target_device_num = int(hw_spec[1])
+    
+    print(f"Parsed: card_name='{target_card_name}', card_num={target_card_num}, device_num={target_device_num}")
+    
+    # Search through available devices
     for i, device in enumerate(devices):
-        if INPUT_DEVICE in device['name'] or device['name'] in INPUT_DEVICE:
-            print(f"Found exact match: {device['name']} (index {i})")
+        device_name = device['name']
+        print(f"Device {i}: {device_name}")
+        
+        # Skip devices without input capability
+        if device['max_input_channels'] == 0:
+            print(f"  -> Skipping (no input channels)")
+            continue
+        
+        # Method 1: Look for exact hw specification in device name
+        if target_card_num is not None and target_device_num is not None:
+            expected_hw = f"hw:{target_card_num},{target_device_num}"
+            if expected_hw in device_name:
+                print(f"  -> MATCH: Found exact hw spec '{expected_hw}'")
+                return i
+        
+        # Method 2: Look for card name + device number pattern
+        if target_card_name and target_device_num is not None:
+            # Look for patterns like "Loopback: PCM (hw:9,1)"
+            if (target_card_name in device_name and 
+                f",{target_device_num}" in device_name):
+                print(f"  -> MATCH: Found card name '{target_card_name}' with device {target_device_num}")
+                return i
+        
+        # Method 3: Fallback - just card name match (use first available)
+        if target_card_name and target_card_name in device_name:
+            print(f"  -> Partial match: Found card name '{target_card_name}' (will continue looking for exact match)")
+            # Don't return yet, keep looking for exact match
+    
+    # If no exact match found, try partial matches as fallback
+    print("No exact match found, trying fallback matches...")
+    for i, device in enumerate(devices):
+        device_name = device['name']
+        if (device['max_input_channels'] > 0 and 
+            target_card_name and target_card_name in device_name):
+            print(f"FALLBACK: Using {device_name} (index {i})")
             return i
     
-    # Try partial match for Loopback
-    for i, device in enumerate(devices):
-        if 'Loopback' in device['name'] and device['max_input_channels'] > 0:
-            print(f"Found Loopback device: {device['name']} (index {i})")
-            return i
-    
-    # Fall back to default
-    print(f"No match found for '{INPUT_DEVICE}', using default input device")
+    print(f"ERROR: No matching device found for '{INPUT_DEVICE}'")
     return None
 
 def test_audio_stream():
