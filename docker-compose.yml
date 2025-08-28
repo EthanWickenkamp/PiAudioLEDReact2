@@ -14,6 +14,7 @@ services:
       environment:
         IN_PCM:  "hw:Loopback,1,0"  # read from tap
         OUT_PCM: "plughw:BossDAC,0" # write to DAC
+        OUT_PCM2: "hw:Loopback,0,1" # write to tap (for testing)
         RATE:    "44100"
         PERIOD:  "256"
         FRAGS:   "3"
