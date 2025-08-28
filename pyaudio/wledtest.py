@@ -1,196 +1,219 @@
-import os, sys, socket, struct, time
-import numpy as np
-import sounddevice as sd
+import socket, struct, time, math
+import os
 
-# ---------- ENV ----------
-MATCH_DEVICE = os.getenv('IN_PCM', 'hw:9,1')        # match substring from sd.query_devices() like "Loopback: PCM (hw:9,1)"
-SAMPLE_RATE  = int(os.getenv('SAMPLE_RATE', '44100'))
-FRAME_SIZE   = int(os.getenv('FRAME_SIZE',  '1024'))
-CHANNELS     = 2
+# ---------- Configuration ----------
+WLED_HOST    = os.getenv('WLED_HOST', '192.168.50.165')  # Change to your WLED IP
+WLED_SR_PORT = int(os.getenv('WLED_SR_PORT', '11988'))
+MULTICAST_IP = '239.0.0.1'  # WLED multicast address
 
-WLED_HOST    = os.getenv('WLED_HOST',    '192.168.50.165')  # or '239.0.0.1' for multicast
-WLED_SR_PORT = int(os.getenv('WLED_SR_PORT', '11988'))      # Audio Sync default
+# WLED Audio Sync v2 packet format
+PKT_FMT = "<6sffBB16Bff"
+HEADER = b"00002\x00"
 
-# ---------- Resolve PortAudio input device by name substring ----------
-def resolve_input_device(match_substring: str) -> int:
-    devices = sd.query_devices()
-    # prefer ALSA-hostapi matches first
-    hostapis = sd.query_hostapis()
-    def hostapi_name(i): return hostapis[devices[i]['hostapi']]['name']
-    for i, d in enumerate(devices):
-        if d['max_input_channels'] > 0 and match_substring in d['name'] and hostapi_name(i) == 'ALSA':
-            return i
-    for i, d in enumerate(devices):
-        if d['max_input_channels'] > 0 and match_substring in d['name']:
-            return i
-    print("No PortAudio input device matched:", match_substring)
-    for i, d in enumerate(devices):
-        print(f"[{i}] {d['name']}  in:{d['max_input_channels']} out:{d['max_output_channels']}")
-    sys.exit(2)
-
-DEV_INDEX = resolve_input_device(MATCH_DEVICE)
-
-# ---------- UDP socket ----------
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
-# ---------- Audio Sync v2 packet builder ----------
-# FIXED Layout based on WLED 0.14.0+ v2 format:
-# struct audioSyncPacket_v2 {
-#   char header[6] = "00002\0";     // 6 bytes
-#   float sampleRaw;                // 4 bytes - raw sample or AGC'd sample
-#   float sampleSmth;               // 4 bytes - smoothed sample (sampleAvg or sampleAgc)
-#   uint8_t samplePeak;             // 1 byte  - 0=no peak, >=1 peak detected
-#   uint8_t reserved1;              // 1 byte  - reserved
-#   uint8_t fftResult[16];          // 16 bytes - FFT results per GEQ channel
-#   float FFT_Magnitude;            // 4 bytes - magnitude of strongest peak
-#   float FFT_MajorPeak;            // 4 bytes - frequency of strongest peak
-# };
-PKT_FMT = "<6sffBB16Bff"  # Little-endian format
-HEADER  = b"00002\x00"    # Correct header for v2 format
-_prev_smth = [0.0]
-
-def to_audio_sync_packet(frame: np.ndarray, sr: int) -> bytes:
-    # frame: float32, shape (N, 2) in [-1,1]
-    if frame.ndim == 2 and frame.shape[1] >= 2:
-        x = (frame[:, 0] + frame[:, 1]) * 0.5
-    else:
-        x = frame.astype(np.float32).ravel()
-
-    # Calculate RMS for sampleRaw (this should be the "current" sample level)
-    rms = float(np.sqrt(np.mean(x**2)))
+def create_test_packet(test_type="sine", intensity=100):
+    """Create different types of test packets"""
     
-    # Apply basic AGC scaling to make it more responsive
-    # WLED expects sample values in a reasonable range - scale up from 0-1 to 0-512
-    sample_raw = rms * 1024.0  # Increased scaling for better visibility
-    
-    # Ensure minimum activity level to prevent timeout
-    if sample_raw < 1.0:
-        sample_raw = 1.0  # Prevent complete silence from causing timeout
-    
-    # Simple smoothing for sampleSmth (this represents smoothed/averaged sample)
-    alpha = 0.1  # Slower smoothing for sampleSmth
-    _prev_smth[0] = (1 - alpha) * _prev_smth[0] + alpha * sample_raw
-    sample_smth = _prev_smth[0]
-
-    # Peak detection - WLED uses this as a boolean flag
-    peak_level = float(np.max(np.abs(x)))
-    sample_peak = 1 if peak_level > 0.3 else 0  # Threshold for peak detection
-
-    # FFT → 16 frequency bins for GEQ
-    N = len(x)
-    if N < 64:  # Ensure we have enough samples for meaningful FFT
-        N = 64
-        x = np.pad(x, (0, 64 - len(x)), 'constant')
-    
-    # Apply window function
-    win = np.hanning(N).astype(np.float32)
-    X = np.fft.rfft(x * win)
-    mag = np.abs(X)
-    freqs = np.fft.rfftfreq(N, 1.0 / sr)
-
-    # Create 16 logarithmic frequency bands (similar to GEQ)
-    # WLED typically uses bands from ~40Hz to ~10kHz
-    f_lo, f_hi = 40.0, min(10000.0, sr/2)
-    
-    if f_hi <= f_lo:
-        f_hi = sr/4  # Fallback
-    
-    # Create 17 edges for 16 bands
-    edges = np.logspace(np.log10(f_lo), np.log10(f_hi), 17)
-    fft_bands = []
-    
-    for i in range(16):
-        # Find frequency indices for this band
-        idx_start = np.searchsorted(freqs, edges[i])
-        idx_end = np.searchsorted(freqs, edges[i+1])
+    if test_type == "sine":
+        # Simulate a sine wave audio signal
+        t = time.time()
+        freq = 440  # A4 note
+        sample_raw = max(1.0, intensity * (0.5 + 0.5 * math.sin(2 * math.pi * freq * t / 100)))
+        sample_smth = sample_raw * 0.8
+        sample_peak = 1 if sample_raw > intensity * 0.7 else 0
         
-        if idx_end > idx_start:
-            # Average magnitude in this band
-            band_mag = np.mean(mag[idx_start:idx_end])
-        else:
-            band_mag = 0.0
+        # Create FFT bands with some activity
+        fft_bands = []
+        for i in range(16):
+            if 2 <= i <= 6:  # Simulate activity in mid frequencies
+                band_val = int(max(1, intensity * 0.3 * (0.8 + 0.2 * math.sin(t + i))))
+            else:
+                band_val = max(1, int(intensity * 0.1))
+            fft_bands.append(min(255, band_val))
         
-        fft_bands.append(band_mag)
+        fft_magnitude = sample_raw * 10
+        fft_major_peak = 440.0
     
-    # Normalize FFT bands to 0-255 range with minimum activity
-    max_band = max(fft_bands) if fft_bands else 1.0
-    if max_band > 0:
-        fft_u8 = [max(1, min(255, int((band / max_band) * 255))) for band in fft_bands]
-    else:
-        fft_u8 = [1] * 16  # Minimum activity to prevent timeout
-
-    # Find dominant frequency and its magnitude
-    if len(mag) > 1:
-        dominant_idx = int(np.argmax(mag[1:]) + 1)  # Skip DC component
-        fft_magnitude = float(mag[dominant_idx])
-        fft_major_peak = float(freqs[dominant_idx])
-    else:
+    elif test_type == "bass":
+        # Simulate bass-heavy music
+        t = time.time()
+        sample_raw = max(1.0, intensity * (0.6 + 0.4 * math.sin(2 * math.pi * t / 4)))
+        sample_smth = sample_raw * 0.9
+        sample_peak = 1 if (int(t * 2) % 4) == 0 else 0  # Peak every 2 seconds
+        
+        # Heavy bass in first few bands
+        fft_bands = []
+        for i in range(16):
+            if i <= 3:  # Bass frequencies
+                band_val = int(max(10, intensity * (0.8 + 0.2 * math.sin(t * 3 + i))))
+            elif i <= 8:  # Mid frequencies
+                band_val = int(max(5, intensity * 0.4))
+            else:  # High frequencies
+                band_val = max(1, int(intensity * 0.2))
+            fft_bands.append(min(255, band_val))
+        
+        fft_magnitude = sample_raw * 15
+        fft_major_peak = 80.0
+    
+    elif test_type == "quiet":
+        # Very minimal activity to test threshold
+        sample_raw = 2.0
+        sample_smth = 1.5
+        sample_peak = 0
+        fft_bands = [1] * 16  # Minimal activity
+        fft_magnitude = 1.0
+        fft_major_peak = 100.0
+    
+    elif test_type == "silence":
+        # Complete silence test
+        sample_raw = 0.0
+        sample_smth = 0.0
+        sample_peak = 0
+        fft_bands = [0] * 16
         fft_magnitude = 0.0
         fft_major_peak = 0.0
+    
+    else:  # "full" - full spectrum activity
+        t = time.time()
+        sample_raw = max(1.0, intensity * (0.7 + 0.3 * math.sin(2 * math.pi * t / 3)))
+        sample_smth = sample_raw * 0.85
+        sample_peak = 1 if (int(t * 4) % 3) == 0 else 0
+        
+        # Activity across all bands
+        fft_bands = []
+        for i in range(16):
+            phase = t + i * 0.5
+            band_val = int(max(5, intensity * 0.6 * (0.7 + 0.3 * math.sin(phase))))
+            fft_bands.append(min(255, band_val))
+        
+        fft_magnitude = sample_raw * 12
+        fft_major_peak = 1000.0 + 500 * math.sin(t)
+    
+    # Pack the packet
+    packet = struct.pack(PKT_FMT,
+                        HEADER,           # 6 bytes: "00002\0"
+                        sample_raw,       # 4 bytes: float sampleRaw
+                        sample_smth,      # 4 bytes: float sampleSmth
+                        sample_peak,      # 1 byte:  uint8_t samplePeak
+                        0,                # 1 byte:  uint8_t reserved
+                        *fft_bands,       # 16 bytes: uint8_t fftResult[16]
+                        fft_magnitude,    # 4 bytes: float FFT_Magnitude
+                        fft_major_peak)   # 4 bytes: float FFT_MajorPeak
+    
+    return packet, sample_raw, sample_peak, fft_bands
 
-    # Pack the packet according to WLED v2 format
-    return struct.pack(PKT_FMT, 
-                      HEADER,           # 6 bytes: "00002\0"
-                      sample_raw,       # 4 bytes: float sampleRaw
-                      sample_smth,      # 4 bytes: float sampleSmth  
-                      sample_peak,      # 1 byte:  uint8_t samplePeak
-                      0,                # 1 byte:  uint8_t reserved1
-                      *fft_u8,          # 16 bytes: uint8_t fftResult[16]
-                      fft_magnitude,    # 4 bytes: float FFT_Magnitude
-                      fft_major_peak)   # 4 bytes: float FFT_MajorPeak
-
-# ---------- Run ----------
-print("\n=== WLED Audio Sync Sender (v2 Format) ===")
-print(f"Capture Device idx: {DEV_INDEX}  name: {sd.query_devices(DEV_INDEX)['name']}")
-print(f"Sample Rate:        {SAMPLE_RATE} Hz")
-print(f"Frame Size:         {FRAME_SIZE}")
-print(f"Sending to:         {WLED_HOST}:{WLED_SR_PORT}")
-print(f"Packet size:        {struct.calcsize(PKT_FMT)} bytes\n")
-
-try:
-    with sd.InputStream(device=DEV_INDEX,
-                        channels=CHANNELS,
-                        samplerate=SAMPLE_RATE,
-                        blocksize=FRAME_SIZE,
-                        dtype='float32') as stream:
-        print("✅ Input stream opened, streaming to WLED… (Ctrl+C to stop)")
-        last_log = 0.0
+def test_wled_connection():
+    """Test different packet types and connection methods"""
+    
+    print("=== WLED Audio Sync Test Packet Sender ===")
+    print(f"Target IP: {WLED_HOST}:{WLED_SR_PORT}")
+    print(f"Multicast: {MULTICAST_IP}:{WLED_SR_PORT}")
+    print(f"Packet size: {struct.calcsize(PKT_FMT)} bytes")
+    print()
+    
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    
+    try:
+        tests = [
+            ("silence", 0, "Test complete silence"),
+            ("quiet", 50, "Test minimal activity"),
+            ("sine", 100, "Test sine wave simulation"),
+            ("bass", 150, "Test bass-heavy pattern"),
+            ("full", 120, "Test full spectrum activity")
+        ]
+        
+        for test_name, intensity, description in tests:
+            print(f"\n--- {description} ---")
+            print(f"Test: {test_name}, Intensity: {intensity}")
+            
+            # Test both direct IP and multicast
+            targets = [
+                (WLED_HOST, "Direct IP"),
+                (MULTICAST_IP, "Multicast")
+            ]
+            
+            for target_ip, method in targets:
+                print(f"\nTesting {method} ({target_ip}):")
+                
+                for i in range(10):  # Send 10 packets per test
+                    packet, sample_raw, sample_peak, fft_bands = create_test_packet(test_name, intensity)
+                    
+                    try:
+                        sock.sendto(packet, (target_ip, WLED_SR_PORT))
+                        
+                        # Show packet details for first packet of each test
+                        if i == 0:
+                            print(f"  Sample Raw: {sample_raw:.1f}, Peak: {sample_peak}")
+                            print(f"  FFT Bands: [{fft_bands[0]}, {fft_bands[1]}, {fft_bands[2]}, ..., {fft_bands[-1]}]")
+                        
+                        if i == 0:
+                            print(f"  Sending packets", end="", flush=True)
+                        elif i % 2 == 0:
+                            print(".", end="", flush=True)
+                    
+                    except Exception as e:
+                        print(f"  Error sending to {target_ip}: {e}")
+                        break
+                    
+                    time.sleep(0.1)  # 10Hz packet rate
+                
+                print(" Done!")
+            
+            # Wait between tests
+            print(f"\nWaiting 3 seconds before next test...")
+            time.sleep(3)
+        
+        print(f"\n=== Continuous Test Mode ===")
+        print("Sending continuous 'bass' pattern packets...")
+        print("Check your WLED device now - audio reactive effects should be active!")
+        print("Press Ctrl+C to stop")
+        
         packet_count = 0
+        start_time = time.time()
         
         while True:
-            data, overflowed = stream.read(FRAME_SIZE)
-            if overflowed:
-                print("⚠️  Audio buffer overflow!", flush=True)
+            # Alternate between direct and multicast every 50 packets
+            target_ip = WLED_HOST if (packet_count // 50) % 2 == 0 else MULTICAST_IP
             
-            # Create and send packet
-            pkt = to_audio_sync_packet(data, SAMPLE_RATE)
-            sock.sendto(pkt, (WLED_HOST, WLED_SR_PORT))
+            packet, sample_raw, sample_peak, fft_bands = create_test_packet("bass", 120)
+            sock.sendto(packet, (target_ip, WLED_SR_PORT))
+            
             packet_count += 1
             
-            # CRITICAL: WLED expects packets at regular intervals
-            # Without this delay, packets arrive too fast and WLED may timeout
-            time.sleep(0.02)  # ~50Hz packet rate (20ms intervals)
+            # Log every 50 packets
+            if packet_count % 50 == 0:
+                elapsed = time.time() - start_time
+                rate = packet_count / elapsed
+                target_type = "Direct" if target_ip == WLED_HOST else "Multicast"
+                print(f"Packets: {packet_count:4d} | Rate: {rate:.1f}/s | Target: {target_type} | Raw: {sample_raw:.1f}")
+            
+            time.sleep(0.05)  # 20Hz packet rate
+            
+    except KeyboardInterrupt:
+        elapsed = time.time() - start_time
+        rate = packet_count / elapsed if elapsed > 0 else 0
+        print(f"\n\nTest completed!")
+        print(f"Total packets sent: {packet_count}")
+        print(f"Average rate: {rate:.1f} packets/second")
+        print(f"Duration: {elapsed:.1f} seconds")
+    
+    except Exception as e:
+        print(f"Error: {e}")
+    
+    finally:
+        sock.close()
 
-            # Enhanced logging every ~1 second
-            now = time.time()
-            if now - last_log > 1.0:
-                last_log = now
-                
-                # Calculate current levels for display
-                if data.ndim == 2:
-                    mono = (data[:, 0] + data[:, 1]) * 0.5
-                else:
-                    mono = data.flatten()
-                
-                rms = float(np.sqrt(np.mean(mono**2)))
-                peak = float(np.max(np.abs(mono)))
-                scaled_rms = rms * 512.0
-                
-                print(f"Packets: {packet_count:6d} | RMS: {rms:.4f} | Scaled: {scaled_rms:6.1f} | Peak: {peak:.4f}", flush=True)
-
-except KeyboardInterrupt:
-    print(f"\nStopped after sending {packet_count} packets.")
-except Exception as e:
-    print(f"Error: {e}")
-finally:
-    sock.close()
+if __name__ == "__main__":
+    print("WLED Audio Sync Test Tool")
+    print("=" * 40)
+    print("Make sure your WLED device is:")
+    print("1. Connected to the network")
+    print("2. Audio Reactive usermod is enabled")
+    print("3. Sync -> Audio Sync is set to 'Receive'")
+    print("4. You have selected an audio-reactive effect")
+    print("5. Device has been rebooted after changing sync settings")
+    print()
+    
+    # Allow user to confirm setup
+    input("Press Enter when ready to start testing...")
+    
+    test_wled_connection()
