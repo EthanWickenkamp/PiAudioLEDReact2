@@ -7,7 +7,10 @@ services:
       network_mode: host
       privileged: true              # for modprobe (or cap_add: [SYS_MODULE])
       devices:
-        - /dev/snd:/dev/snd
+        - /dev/snd
+      volumes:
+          - /lib/modules:/lib/modules:ro
+          - /proc:/proc
       environment:
         IN_PCM:  "hw:Loopback,1,0"  # read from tap
         OUT_PCM: "plughw:BossDAC,0" # write to DAC
@@ -34,7 +37,7 @@ services:
     network_mode: host
     privileged: true
     devices:
-      - /dev/snd:/dev/snd
+      - /dev/snd
     volumes:
      - /run/dbus/system_bus_socket:/run/dbus/system_bus_socket:ro
     environment:
@@ -51,7 +54,7 @@ services:
     restart: unless-stopped   
     network_mode: host
     devices:
-      - /dev/snd:/dev/snd
+      - /dev/snd
     # volumes:
     environment:
       INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
