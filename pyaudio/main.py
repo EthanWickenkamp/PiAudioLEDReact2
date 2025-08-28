@@ -17,10 +17,6 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 def main():
     print(sd.query_devices())
     print(f"[analyzer] input={DEVICE} rate={RATE} frame={FRAME} → {HOST}:{PORT}")
-    with sd.InputStream(blocksize=FRAME, callback=process):
-        import time
-        while True:
-            time.sleep(1)
 
 if __name__ == "__main__":
     main()
