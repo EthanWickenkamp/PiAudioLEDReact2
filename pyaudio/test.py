@@ -59,6 +59,6 @@ try:
             elif rms > 0.001: status, bar = "🔉 MEDIUM", "██████░░░░░░"
             elif rms > 0.0001:status, bar = "🔈 WEAK  ", "███░░░░░░░░░"
             else:              status, bar = "🔇 SILENT", "░░░░░░░░░░░░"
-            print(f"{status} {bar}  peak:{peak:.3f}", end="\r")
+            print(f"{status} {bar}  peak:{peak:.3f}", flush=True)
 except KeyboardInterrupt:
     print("\nStopped.")
