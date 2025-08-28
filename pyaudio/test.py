@@ -11,7 +11,7 @@ import time
 from datetime import datetime
 
 # Configuration from environment variables
-INPUT_DEVICE = os.getenv('INPUT_DEVICE', 'hw:Loopback,1,0')
+INPUT_DEVICE = os.getenv('INPUT_DEVICE', 'hw:Loopback,1,1')
 SAMPLE_RATE = int(os.getenv('SAMPLE_RATE', '44100'))
 FRAME_SIZE = int(os.getenv('FRAME_SIZE', '1024'))
 CHANNELS = 2  # Stereo

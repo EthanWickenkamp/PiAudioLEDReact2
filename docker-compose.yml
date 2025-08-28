@@ -58,7 +58,7 @@ services:
       - /dev/snd
     # volumes:
     environment:
-      INPUT_DEVICE: "hw:Loopback,1,0"   # read from tap (same as audio-bridge input)
+      INPUT_DEVICE: "hw:Loopback,1,1"   # read from tap (same as audio-bridge input)
       SAMPLE_RATE: "44100"
       FRAME_SIZE: "1024"
       WLED_HOST: "192.168.50.123"
