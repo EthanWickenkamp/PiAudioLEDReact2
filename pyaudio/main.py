@@ -1,10 +1,11 @@
 import os
 import socket
 import time
-import sys
+import threading
 import numpy as np
 import sounddevice as sd
 from typing import Optional
+import json
 
 # Environment variables
 DEVICE = os.getenv("INPUT_DEVICE", "hw:Loopback,1,0")
@@ -13,233 +14,285 @@ FRAME = int(os.getenv("FRAME_SIZE", "1024"))
 HOST = os.getenv("WLED_HOST", "192.168.50.123")
 PORT = int(os.getenv("WLED_PORT", "21324"))
 
-def print_separator(title: str):
-    """Print a clear section separator"""
-    print("\n" + "="*60)
-    print(f" {title}")
-    print("="*60)
+# Audio analysis parameters
+CHANNELS = 2
+DTYPE = 'float32'
 
-def check_environment():
-    """Display all environment variables"""
-    print_separator("ENVIRONMENT VARIABLES")
-    print(f"INPUT_DEVICE: {DEVICE}")
-    print(f"SAMPLE_RATE: {RATE}")
-    print(f"FRAME_SIZE: {FRAME}")
-    print(f"WLED_HOST: {HOST}")
-    print(f"WLED_PORT: {PORT}")
+# Global variables for audio processing
+audio_data = np.zeros(FRAME)
+data_lock = threading.Lock()
+running = False
 
-def check_sounddevice_version():
-    """Check sounddevice library info"""
-    print_separator("SOUNDDEVICE INFO")
-    print(f"sounddevice version: {sd.__version__}")
-    try:
-        print(f"PortAudio version: {sd.get_portaudio_version()}")
-    except Exception as e:
-        print(f"Error getting PortAudio version: {e}")
-
-def list_all_devices():
-    """List all available audio devices with detailed info"""
-    print_separator("ALL AUDIO DEVICES")
-    try:
-        devices = sd.query_devices()
-        print(f"Total devices found: {len(devices)}")
-        print("\nDevice List:")
-        print("-" * 80)
-        for i, device in enumerate(devices):
-            print(f"[{i:2d}] {device['name']:<30} | "
-                  f"In:{device['max_input_channels']:2d} | "
-                  f"Out:{device['max_output_channels']:2d} | "
-                  f"Rate:{device['default_samplerate']:8.0f} | "
-                  f"API: {sd.query_hostapis(device['hostapi'])['name']}")
+class AudioAnalyzer:
+    def __init__(self):
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(0.1)  # Non-blocking
         
-        print("\nDefault devices:")
+        # Audio analysis buffers
+        self.fft_size = FRAME
+        self.freqs = np.fft.fftfreq(self.fft_size, 1/RATE)
+        self.window = np.hanning(self.fft_size)
+        
+        # LED parameters (adjust based on your WLED setup)
+        self.num_leds = 144  # Adjust to your LED count
+        self.brightness = 128  # 0-255
+        
+        print(f"[AudioAnalyzer] Initialized for {self.num_leds} LEDs")
+        print(f"[AudioAnalyzer] Target: {HOST}:{PORT}")
+    
+    def audio_callback(self, indata, frames, time, status):
+        """Callback function for audio input"""
+        global audio_data, data_lock
+        
+        if status:
+            print(f"[Audio] Status: {status}")
+        
+        # Convert to mono by averaging channels
+        mono_data = np.mean(indata, axis=1) if indata.ndim > 1 else indata
+        
+        with data_lock:
+            audio_data = mono_data.copy()
+    
+    def analyze_audio(self, data):
+        """Analyze audio data and extract features"""
+        if len(data) == 0:
+            return None
+        
+        # Apply window to reduce spectral leakage
+        windowed = data * self.window
+        
+        # Compute FFT
+        fft = np.fft.fft(windowed)
+        magnitude = np.abs(fft[:len(fft)//2])  # Only positive frequencies
+        
+        # Calculate volume (RMS)
+        volume = np.sqrt(np.mean(data**2))
+        
+        # Frequency bands for LED visualization
+        # Split spectrum into bands (bass, mid, treble, etc.)
+        freq_bands = self.split_frequency_bands(magnitude)
+        
+        return {
+            'volume': volume,
+            'bands': freq_bands,
+            'peak_freq': self.freqs[np.argmax(magnitude)]
+        }
+    
+    def split_frequency_bands(self, magnitude, num_bands=8):
+        """Split frequency spectrum into bands"""
+        band_size = len(magnitude) // num_bands
+        bands = []
+        
+        for i in range(num_bands):
+            start_idx = i * band_size
+            end_idx = (i + 1) * band_size
+            band_energy = np.mean(magnitude[start_idx:end_idx])
+            bands.append(band_energy)
+        
+        return bands
+    
+    def create_led_data(self, analysis):
+        """Create LED data based on audio analysis"""
+        if analysis is None:
+            # Return black/off LEDs
+            return [0, 0, 0] * self.num_leds
+        
+        volume = analysis['volume']
+        bands = analysis['bands']
+        
+        led_data = []
+        
+        # Simple visualization: map frequency bands to different sections of LED strip
+        leds_per_band = self.num_leds // len(bands)
+        
+        for i, band_energy in enumerate(bands):
+            # Scale band energy to color intensity
+            intensity = min(255, int(band_energy * 1000))  # Adjust scaling as needed
+            
+            # Create color based on frequency band
+            if i < 2:  # Bass - Red
+                color = [intensity, 0, 0]
+            elif i < 4:  # Mid - Green
+                color = [0, intensity, 0]
+            else:  # High - Blue
+                color = [0, 0, intensity]
+            
+            # Apply volume scaling
+            volume_scale = min(1.0, volume * 10)  # Adjust scaling
+            color = [int(c * volume_scale) for c in color]
+            
+            # Add colors for this band's LEDs
+            start_led = i * leds_per_band
+            end_led = min(self.num_leds, (i + 1) * leds_per_band)
+            
+            for _ in range(start_led, end_led):
+                led_data.extend(color)
+        
+        return led_data
+    
+    def send_to_wled(self, led_data):
+        """Send LED data to WLED via UDP"""
         try:
-            default_input = sd.query_devices(kind='input')
-            default_output = sd.query_devices(kind='output')
-            print(f"Default input:  [{default_input['name']}]")
-            print(f"Default output: [{default_output['name']}]")
+            # WLED UDP format: [DRGB, channel, data...]
+            # DRGB protocol: first byte is 1, second byte is timeout
+            packet = bytearray([1, 1])  # DRGB protocol, 1 second timeout
+            packet.extend(led_data)
+            
+            self.sock.sendto(packet, (HOST, PORT))
+            
+        except socket.error as e:
+            # Don't spam errors, just log occasionally
+            if time.time() % 10 < 0.1:  # Every ~10 seconds
+                print(f"[WLED] Network error: {e}")
         except Exception as e:
-            print(f"Error getting default devices: {e}")
-            
-    except Exception as e:
-        print(f"Error listing devices: {e}")
-        return False
-    return True
+            print(f"[WLED] Send error: {e}")
+    
+    def process_audio_loop(self):
+        """Main audio processing loop"""
+        global audio_data, data_lock, running
+        
+        print("[AudioAnalyzer] Starting processing loop...")
+        
+        while running:
+            try:
+                with data_lock:
+                    current_data = audio_data.copy()
+                
+                # Analyze audio
+                analysis = self.analyze_audio(current_data)
+                
+                # Create LED visualization
+                led_data = self.create_led_data(analysis)
+                
+                # Send to WLED
+                self.send_to_wled(led_data)
+                
+                # Debug output (occasionally)
+                if analysis and time.time() % 5 < 0.05:  # Every ~5 seconds
+                    print(f"[Audio] Volume: {analysis['volume']:.4f}, "
+                          f"Peak: {analysis['peak_freq']:.0f}Hz, "
+                          f"Bands: {len(analysis['bands'])}")
+                
+                time.sleep(0.02)  # ~50 FPS
+                
+            except Exception as e:
+                print(f"[AudioAnalyzer] Processing error: {e}")
+                time.sleep(1)
+    
+    def cleanup(self):
+        """Cleanup resources"""
+        try:
+            self.sock.close()
+        except:
+            pass
 
-def search_for_device(search_term: str):
-    """Search for devices containing specific terms"""
-    print_separator(f"SEARCHING FOR DEVICES CONTAINING '{search_term}'")
-    try:
-        devices = sd.query_devices()
-        matches = []
-        for i, device in enumerate(devices):
-            if search_term.lower() in device['name'].lower():
-                matches.append((i, device))
-                print(f"Found: [{i}] {device['name']} - "
-                      f"Input channels: {device['max_input_channels']}")
-        
-        if not matches:
-            print(f"No devices found containing '{search_term}'")
-        return matches
-    except Exception as e:
-        print(f"Error searching devices: {e}")
-        return []
-
-def test_device_by_name(device_name: str):
-    """Test if a specific device can be opened"""
-    print_separator(f"TESTING DEVICE: {device_name}")
-    try:
-        # First try to find device by name
-        devices = sd.query_devices()
-        device_id = None
-        
-        for i, device in enumerate(devices):
-            if device_name in device['name'] or device['name'] in device_name:
-                device_id = i
-                print(f"Found matching device: [{i}] {device['name']}")
-                break
-        
-        if device_id is None:
-            # Try to use the name directly
-            print(f"No exact match found, trying device name directly: {device_name}")
-            device_id = device_name
-        
-        # Test opening the device
-        print(f"Testing device: {device_id}")
-        with sd.InputStream(device=device_id, channels=2, samplerate=RATE, 
-                           blocksize=FRAME, dtype='float32'):
-            print("✓ Device can be opened successfully!")
-            return True
-            
-    except sd.PortAudioError as e:
-        print(f"✗ PortAudio Error: {e}")
-        return False
-    except Exception as e:
-        print(f"✗ General Error: {e}")
-        return False
-
-def test_network_connection():
-    """Test network connectivity to WLED host"""
-    print_separator("NETWORK CONNECTIVITY TEST")
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(5)
-        
-        # Try to connect
-        test_data = b"test"
-        sock.sendto(test_data, (HOST, PORT))
-        print(f"✓ Successfully sent test data to {HOST}:{PORT}")
-        sock.close()
-        return True
-    except socket.timeout:
-        print(f"✗ Timeout connecting to {HOST}:{PORT}")
-        return False
-    except socket.error as e:
-        print(f"✗ Socket error connecting to {HOST}:{PORT}: {e}")
-        return False
-    except Exception as e:
-        print(f"✗ Error connecting to {HOST}:{PORT}: {e}")
-        return False
-
-def test_audio_stream():
-    """Test actual audio streaming"""
-    print_separator("AUDIO STREAM TEST")
-    try:
-        print(f"Attempting to open audio stream with device: {DEVICE}")
-        
-        def callback(indata, frames, time, status):
-            if status:
-                print(f"Stream status: {status}")
-            # Just print level to show we're getting data
-            level = np.sqrt(np.mean(indata**2))
-            if level > 0.001:  # Only print if there's significant audio
-                print(f"Audio level: {level:.4f}")
-        
-        with sd.InputStream(device=DEVICE, channels=2, samplerate=RATE,
-                           blocksize=FRAME, dtype='float32', callback=callback):
-            print("✓ Audio stream opened successfully!")
-            print("Listening for 5 seconds (play some audio to see levels)...")
-            time.sleep(5)
-            print("Stream test complete")
-            return True
-            
-    except Exception as e:
-        print(f"✗ Audio stream error: {e}")
-        return False
-
-def wait_for_device(device_name: str, max_attempts: int = 30):
-    """Wait for a specific device to become available"""
-    print_separator(f"WAITING FOR DEVICE: {device_name}")
+def wait_for_audio_device(device_name: str, max_attempts: int = 30):
+    """Wait for audio device to become available"""
+    print(f"[Setup] Waiting for audio device: {device_name}")
     
     for attempt in range(max_attempts):
         try:
             devices = sd.query_devices()
+            
+            # Try to find device by name matching
             for i, device in enumerate(devices):
-                if device_name.lower() in device['name'].lower():
-                    print(f"✓ Device found after {attempt + 1} attempts: {device['name']}")
+                if ("loopback" in device_name.lower() and 
+                    "loopback" in device['name'].lower()):
+                    print(f"[Setup] Found Loopback device: {device['name']}")
+                    return True
+                elif device_name in device['name'] or device['name'] in device_name:
+                    print(f"[Setup] Found matching device: {device['name']}")
                     return True
             
-            print(f"Attempt {attempt + 1}/{max_attempts}: Device not found, waiting...")
+            print(f"[Setup] Attempt {attempt + 1}/{max_attempts}: Device not ready")
             time.sleep(2)
             
         except Exception as e:
-            print(f"Attempt {attempt + 1}: Error checking devices: {e}")
+            print(f"[Setup] Error checking devices: {e}")
             time.sleep(2)
     
-    print(f"✗ Device not found after {max_attempts} attempts")
+    print(f"[Setup] Device not found after {max_attempts} attempts")
     return False
 
 def main():
-    """Main debugging function"""
-    print_separator("AUDIO DEVICE DEBUGGING STARTED")
+    global running
     
-    # Basic environment check
-    check_environment()
+    print("="*60)
+    print(" AUDIO PROCESSOR STARTING")
+    print("="*60)
+    print(f"Device: {DEVICE}")
+    print(f"Sample Rate: {RATE}")
+    print(f"Frame Size: {FRAME}")
+    print(f"WLED Target: {HOST}:{PORT}")
+    print("="*60)
     
-    # Check sounddevice library
-    check_sounddevice_version()
+    # Wait for audio device
+    if not wait_for_audio_device(DEVICE):
+        print("[ERROR] Audio device not available!")
+        return 1
     
-    # List all devices
-    if not list_all_devices():
-        print("Cannot proceed - no audio devices accessible")
-        sys.exit(1)
+    # List available devices for debugging
+    try:
+        print("\n[Info] Available audio devices:")
+        devices = sd.query_devices()
+        for i, device in enumerate(devices):
+            print(f"  [{i}] {device['name']} - In:{device['max_input_channels']}")
+    except Exception as e:
+        print(f"[Warning] Could not list devices: {e}")
     
-    # Search for loopback devices
-    loopback_devices = search_for_device("loopback")
+    # Initialize analyzer
+    analyzer = AudioAnalyzer()
     
-    # Search for any ALSA devices
-    alsa_devices = search_for_device("hw:")
+    try:
+        # Test network connection
+        print(f"\n[Setup] Testing connection to {HOST}:{PORT}")
+        test_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        test_sock.settimeout(5)
+        test_sock.sendto(b"test", (HOST, PORT))
+        test_sock.close()
+        print("[Setup] Network connection OK")
+        
+    except Exception as e:
+        print(f"[Warning] Network test failed: {e}")
     
-    # Test the specific device we want to use
-    device_works = test_device_by_name(DEVICE)
+    try:
+        print(f"\n[Setup] Opening audio stream: {DEVICE}")
+        
+        # Start audio processing thread
+        running = True
+        process_thread = threading.Thread(target=analyzer.process_audio_loop)
+        process_thread.daemon = True
+        process_thread.start()
+        
+        # Start audio stream
+        with sd.InputStream(
+            device=DEVICE,
+            channels=CHANNELS,
+            samplerate=RATE,
+            blocksize=FRAME,
+            dtype=DTYPE,
+            callback=analyzer.audio_callback
+        ):
+            print("[Audio] Stream started successfully!")
+            print("[Audio] Processing audio... Press Ctrl+C to stop")
+            
+            # Keep main thread alive
+            while running:
+                time.sleep(1)
     
-    # If the device doesn't work, wait for it
-    if not device_works:
-        print("Target device not working, waiting for it to become available...")
-        if wait_for_device("loopback"):
-            device_works = test_device_by_name(DEVICE)
+    except KeyboardInterrupt:
+        print("\n[Shutdown] Interrupted by user")
+    except Exception as e:
+        print(f"\n[ERROR] Audio stream error: {e}")
+        return 1
     
-    # Test network connection
-    network_works = test_network_connection()
+    finally:
+        print("[Shutdown] Cleaning up...")
+        running = False
+        analyzer.cleanup()
+        print("[Shutdown] Complete")
     
-    # Final summary
-    print_separator("DEBUGGING SUMMARY")
-    print(f"Target device ({DEVICE}): {'✓ WORKING' if device_works else '✗ FAILED'}")
-    print(f"Network connection: {'✓ WORKING' if network_works else '✗ FAILED'}")
-    print(f"Loopback devices found: {len(loopback_devices)}")
-    
-    if device_works and network_works:
-        print("\n🎉 All systems check passed! Attempting audio stream test...")
-        test_audio_stream()
-    else:
-        print("\n❌ System checks failed. Check the errors above.")
-        sys.exit(1)
+    return 0
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nDebugging interrupted by user")
-    except Exception as e:
-        print(f"\nUnexpected error: {e}")
-        sys.exit(1)
+    exit(main())
