@@ -60,8 +60,12 @@ def to_audio_sync_packet(frame: np.ndarray, sr: int) -> bytes:
     rms = float(np.sqrt(np.mean(x**2)))
     
     # Apply basic AGC scaling to make it more responsive
-    # Scale RMS to a more reasonable range (WLED expects values roughly 0-512 range)
-    sample_raw = rms * 512.0
+    # WLED expects sample values in a reasonable range - scale up from 0-1 to 0-512
+    sample_raw = rms * 1024.0  # Increased scaling for better visibility
+    
+    # Ensure minimum activity level to prevent timeout
+    if sample_raw < 1.0:
+        sample_raw = 1.0  # Prevent complete silence from causing timeout
     
     # Simple smoothing for sampleSmth (this represents smoothed/averaged sample)
     alpha = 0.1  # Slower smoothing for sampleSmth
@@ -108,12 +112,12 @@ def to_audio_sync_packet(frame: np.ndarray, sr: int) -> bytes:
         
         fft_bands.append(band_mag)
     
-    # Normalize FFT bands to 0-255 range
+    # Normalize FFT bands to 0-255 range with minimum activity
     max_band = max(fft_bands) if fft_bands else 1.0
     if max_band > 0:
-        fft_u8 = [min(255, int((band / max_band) * 255)) for band in fft_bands]
+        fft_u8 = [max(1, min(255, int((band / max_band) * 255))) for band in fft_bands]
     else:
-        fft_u8 = [0] * 16
+        fft_u8 = [1] * 16  # Minimum activity to prevent timeout
 
     # Find dominant frequency and its magnitude
     if len(mag) > 1:
@@ -162,6 +166,10 @@ try:
             pkt = to_audio_sync_packet(data, SAMPLE_RATE)
             sock.sendto(pkt, (WLED_HOST, WLED_SR_PORT))
             packet_count += 1
+            
+            # CRITICAL: WLED expects packets at regular intervals
+            # Without this delay, packets arrive too fast and WLED may timeout
+            time.sleep(0.02)  # ~50Hz packet rate (20ms intervals)
 
             # Enhanced logging every ~1 second
             now = time.time()
