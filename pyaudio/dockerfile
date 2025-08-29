@@ -1,10 +1,12 @@
 # Bae image
 FROM python:3.11-slim
 
-# System libs: PortAudio runtime + ALSA
+# System libs: PortAudio + ALSA + sndfile + basic tools for debugging
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      alsa-utils \
-      libportaudio2 libasound2 \
+      libportaudio2 libportaudiocpp0 \
+      libasound2 libasound2-data libasound2-plugins \
+      libsndfile1 \
+      alsa-utils procps iproute2 tcpdump ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # Python deps
@@ -16,4 +18,4 @@ COPY . /app
 WORKDIR /app
 
 
-CMD ["python", "wledtest.py"]
+CMD ["python", "-u", "wledtest.py"]
