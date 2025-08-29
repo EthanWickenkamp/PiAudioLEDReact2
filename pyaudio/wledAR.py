@@ -3,7 +3,7 @@ import os, socket, struct, math, numpy as np
 import sounddevice as sd
 
 HOST = os.getenv("WLED_HOST", "192.168.50.165")
-PORT = int(os.getenv("WLED_AUDIO_PORT", "21324"))
+PORT = int(os.getenv("WLED_PORT", "21324"))
 INPUT_DEVICE = os.getenv("INPUT_DEVICE", None)         # e.g. "hw:Loopback,1,1"
 SR   = int(os.getenv("SAMPLE_RATE", "44100"))
 BS   = int(os.getenv("BLOCKSIZE", "1024"))
