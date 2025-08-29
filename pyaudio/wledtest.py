@@ -1,218 +1,175 @@
-import socket, struct, time, math
-import os
+# wled_audio_v2_test.py
+# Sends WLED Audio UDP V2 packets ("00002\0", 40 bytes).
+# Default: TEST_MODE=1 -> synthetic band sweep (no audio device required).
+# Set TEST_MODE=0 to use ALSA input (requires sounddevice).
 
-# ---------- Configuration ----------
-WLED_HOST    = os.getenv('WLED_HOST', '192.168.50.165')  # Change to your WLED IP
-WLED_SR_PORT = int(os.getenv('WLED_SR_PORT', '11988'))
-MULTICAST_IP = '239.0.0.1'  # WLED multicast address
+import os, socket, struct, time, math
+import numpy as np
 
-# WLED Audio Sync v2 packet format
-PKT_FMT = "<6sffBB16Bff"
-HEADER = b"00002\x00"
+# -------------------------
+# Environment / config
+# -------------------------
+HOST = os.getenv("WLED_HOST", "192.168.50.165")
+PORT = int(os.getenv("WLED_AUDIO_PORT", "11988"))   # match WLED Sync->Receive port
+TEST_MODE = os.getenv("TEST_MODE", "1") == "1"      # 1 = run synthetic test
+INPUT_DEVICE = os.getenv("INPUT_DEVICE", None)      # e.g. "hw:Loopback,1,1"
+SR   = int(os.getenv("SAMPLE_RATE", "44100"))
+BS   = int(os.getenv("BLOCKSIZE", "1024"))
+CH   = int(os.getenv("CHANNELS", "2"))
 
-def create_test_packet(test_type="sine", intensity=100):
-    """Create different types of test packets"""
-    
-    if test_type == "sine":
-        # Simulate a sine wave audio signal
-        t = time.time()
-        freq = 440  # A4 note
-        sample_raw = max(1.0, intensity * (0.5 + 0.5 * math.sin(2 * math.pi * freq * t / 100)))
-        sample_smth = sample_raw * 0.8
-        sample_peak = 1 if sample_raw > intensity * 0.7 else 0
-        
-        # Create FFT bands with some activity
-        fft_bands = []
+# -------------------------
+# Packet format (V2, 40 bytes)
+# -------------------------
+HEADER = b"00002\x00"                  # 6 bytes including NUL
+PACK_FMT = "<6s f f B B 16B f f"       # little-endian
+PACK_SIZE = struct.calcsize(PACK_FMT)  # should be 40
+assert PACK_SIZE == 40, f"PACK_SIZE={PACK_SIZE} (!=40)"
+
+sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+
+def send_packet(sampleRaw, sampleSmth, peak_flag, bands16, mag, peak_hz):
+    """Send one V2 packet to WLED."""
+    if len(bands16) != 16:
+        raise ValueError("bands16 must have 16 uint8 values")
+    # Clip/convert bands to uint8
+    bands16 = [int(max(0, min(255, int(b)))) for b in bands16]
+    payload = struct.pack(
+        PACK_FMT,
+        HEADER,
+        float(sampleRaw),
+        float(sampleSmth),
+        int(peak_flag) & 0xFF,
+        0,                # reserved1
+        *bands16,
+        float(mag),
+        float(peak_hz)
+    )
+    # sanity: 40 bytes
+    if len(payload) != 40:
+        raise RuntimeError(f"Packed payload is {len(payload)} bytes (expected 40)")
+    sock.sendto(payload, (HOST, PORT))
+
+# -------------------------
+# TEST MODE (no audio needed)
+# -------------------------
+def test_sweep(fps=30, duration_sec=0):  # duration_sec=0 -> loop forever
+    print(f"[TEST] Sending synthetic band sweep to {HOST}:{PORT} (Ctrl+C to stop)")
+    print("Make sure WLED: Effect is an AudioReactive effect, Sync->Receive ON, port matches.")
+    interval = 1.0 / max(1, fps)
+    k = 0
+    start = time.time()
+    while True:
+        bands = [0]*16
+        # bright "cursor" + a little tail
+        pos = k % 16
         for i in range(16):
-            if 2 <= i <= 6:  # Simulate activity in mid frequencies
-                band_val = int(max(1, intensity * 0.3 * (0.8 + 0.2 * math.sin(t + i))))
-            else:
-                band_val = max(1, int(intensity * 0.1))
-            fft_bands.append(min(255, band_val))
-        
-        fft_magnitude = sample_raw * 10
-        fft_major_peak = 440.0
-    
-    elif test_type == "bass":
-        # Simulate bass-heavy music
-        t = time.time()
-        sample_raw = max(1.0, intensity * (0.6 + 0.4 * math.sin(2 * math.pi * t / 4)))
-        sample_smth = sample_raw * 0.9
-        sample_peak = 1 if (int(t * 2) % 4) == 0 else 0  # Peak every 2 seconds
-        
-        # Heavy bass in first few bands
-        fft_bands = []
-        for i in range(16):
-            if i <= 3:  # Bass frequencies
-                band_val = int(max(10, intensity * (0.8 + 0.2 * math.sin(t * 3 + i))))
-            elif i <= 8:  # Mid frequencies
-                band_val = int(max(5, intensity * 0.4))
-            else:  # High frequencies
-                band_val = max(1, int(intensity * 0.2))
-            fft_bands.append(min(255, band_val))
-        
-        fft_magnitude = sample_raw * 15
-        fft_major_peak = 80.0
-    
-    elif test_type == "quiet":
-        # Very minimal activity to test threshold
-        sample_raw = 2.0
-        sample_smth = 1.5
-        sample_peak = 0
-        fft_bands = [1] * 16  # Minimal activity
-        fft_magnitude = 1.0
-        fft_major_peak = 100.0
-    
-    elif test_type == "silence":
-        # Complete silence test
-        sample_raw = 0.0
-        sample_smth = 0.0
-        sample_peak = 0
-        fft_bands = [0] * 16
-        fft_magnitude = 0.0
-        fft_major_peak = 0.0
-    
-    else:  # "full" - full spectrum activity
-        t = time.time()
-        sample_raw = max(1.0, intensity * (0.7 + 0.3 * math.sin(2 * math.pi * t / 3)))
-        sample_smth = sample_raw * 0.85
-        sample_peak = 1 if (int(t * 4) % 3) == 0 else 0
-        
-        # Activity across all bands
-        fft_bands = []
-        for i in range(16):
-            phase = t + i * 0.5
-            band_val = int(max(5, intensity * 0.6 * (0.7 + 0.3 * math.sin(phase))))
-            fft_bands.append(min(255, band_val))
-        
-        fft_magnitude = sample_raw * 12
-        fft_major_peak = 1000.0 + 500 * math.sin(t)
-    
-    # Pack the packet
-    packet = struct.pack(PKT_FMT,
-                        HEADER,           # 6 bytes: "00002\0"
-                        sample_raw,       # 4 bytes: float sampleRaw
-                        sample_smth,      # 4 bytes: float sampleSmth
-                        sample_peak,      # 1 byte:  uint8_t samplePeak
-                        0,                # 1 byte:  uint8_t reserved
-                        *fft_bands,       # 16 bytes: uint8_t fftResult[16]
-                        fft_magnitude,    # 4 bytes: float FFT_Magnitude
-                        fft_major_peak)   # 4 bytes: float FFT_MajorPeak
-    
-    return packet, sample_raw, sample_peak, fft_bands
+            d = (i - pos) % 16
+            bands[i] = max(0, 255 - d*60)  # simple trailing falloff
 
-def test_wled_connection():
-    """Test different packet types and connection methods"""
-    
-    print("=== WLED Audio Sync Test Packet Sender ===")
-    print(f"Target IP: {WLED_HOST}:{WLED_SR_PORT}")
-    print(f"Multicast: {MULTICAST_IP}:{WLED_SR_PORT}")
-    print(f"Packet size: {struct.calcsize(PKT_FMT)} bytes")
-    print()
-    
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    
+        sampleRaw  = 0.3
+        sampleSmth = 0.6
+        peak       = 1 if (k % 8 == 0) else 0
+        mag        = 1.0 + 0.2*math.sin(k*0.2)
+        hz         = 440.0 + 200.0*math.sin(k*0.15)
+
+        send_packet(sampleRaw, sampleSmth, peak, bands, mag, hz)
+
+        k += 1
+        if duration_sec and (time.time() - start) > duration_sec:
+            break
+        time.sleep(interval)
+
+# -------------------------
+# AUDIO MODE (requires sounddevice)
+# -------------------------
+def run_audio():
     try:
-        tests = [
-            ("silence", 0, "Test complete silence"),
-            ("quiet", 50, "Test minimal activity"),
-            ("sine", 100, "Test sine wave simulation"),
-            ("bass", 150, "Test bass-heavy pattern"),
-            ("full", 120, "Test full spectrum activity")
-        ]
-        
-        for test_name, intensity, description in tests:
-            print(f"\n--- {description} ---")
-            print(f"Test: {test_name}, Intensity: {intensity}")
-            
-            # Test both direct IP and multicast
-            targets = [
-                (WLED_HOST, "Direct IP"),
-                (MULTICAST_IP, "Multicast")
-            ]
-            
-            for target_ip, method in targets:
-                print(f"\nTesting {method} ({target_ip}):")
-                
-                for i in range(10):  # Send 10 packets per test
-                    packet, sample_raw, sample_peak, fft_bands = create_test_packet(test_name, intensity)
-                    
-                    try:
-                        sock.sendto(packet, (target_ip, WLED_SR_PORT))
-                        
-                        # Show packet details for first packet of each test
-                        if i == 0:
-                            print(f"  Sample Raw: {sample_raw:.1f}, Peak: {sample_peak}")
-                            print(f"  FFT Bands: [{fft_bands[0]}, {fft_bands[1]}, {fft_bands[2]}, ..., {fft_bands[-1]}]")
-                        
-                        if i == 0:
-                            print(f"  Sending packets", end="", flush=True)
-                        elif i % 2 == 0:
-                            print(".", end="", flush=True)
-                    
-                    except Exception as e:
-                        print(f"  Error sending to {target_ip}: {e}")
-                        break
-                    
-                    time.sleep(0.1)  # 10Hz packet rate
-                
-                print(" Done!")
-            
-            # Wait between tests
-            print(f"\nWaiting 3 seconds before next test...")
-            time.sleep(3)
-        
-        print(f"\n=== Continuous Test Mode ===")
-        print("Sending continuous 'bass' pattern packets...")
-        print("Check your WLED device now - audio reactive effects should be active!")
-        print("Press Ctrl+C to stop")
-        
-        packet_count = 0
-        start_time = time.time()
-        
-        while True:
-            # Alternate between direct and multicast every 50 packets
-            target_ip = WLED_HOST if (packet_count // 50) % 2 == 0 else MULTICAST_IP
-            
-            packet, sample_raw, sample_peak, fft_bands = create_test_packet("bass", 120)
-            sock.sendto(packet, (target_ip, WLED_SR_PORT))
-            
-            packet_count += 1
-            
-            # Log every 50 packets
-            if packet_count % 50 == 0:
-                elapsed = time.time() - start_time
-                rate = packet_count / elapsed
-                target_type = "Direct" if target_ip == WLED_HOST else "Multicast"
-                print(f"Packets: {packet_count:4d} | Rate: {rate:.1f}/s | Target: {target_type} | Raw: {sample_raw:.1f}")
-            
-            time.sleep(0.05)  # 20Hz packet rate
-            
-    except KeyboardInterrupt:
-        elapsed = time.time() - start_time
-        rate = packet_count / elapsed if elapsed > 0 else 0
-        print(f"\n\nTest completed!")
-        print(f"Total packets sent: {packet_count}")
-        print(f"Average rate: {rate:.1f} packets/second")
-        print(f"Duration: {elapsed:.1f} seconds")
-    
+        import sounddevice as sd
     except Exception as e:
-        print(f"Error: {e}")
-    
-    finally:
-        sock.close()
+        raise SystemExit(f"sounddevice import failed. Set TEST_MODE=1 or install it. Error: {e}")
 
+    print(f"[AUDIO] Input={INPUT_DEVICE or 'default'} SR={SR} BS={BS} CH={CH} -> {HOST}:{PORT}")
+
+    # simple AGC state
+    agc_target = 0.4
+    agc_strength = 0.02
+    rms_smooth = 0.0
+    last_log = 0.0
+
+    # 16 log-spaced bands ~20..8000 Hz
+    F_MIN, F_MAX = 20.0, 8000.0
+    band_edges = np.geomspace(F_MIN, F_MAX, 17)  # 17 edges, 16 bands
+
+    def compute_features(block):
+        nonlocal rms_smooth
+        # mono
+        x = block.mean(axis=1).astype(np.float32)
+        # window & FFT
+        win = np.hanning(len(x)).astype(np.float32)
+        X = np.fft.rfft(x * win)
+        mag = np.abs(X).astype(np.float32)
+        freqs = np.fft.rfftfreq(len(x), 1.0/SR).astype(np.float32)
+
+        # RMS & peak flag
+        rms = float(np.sqrt(np.mean(x*x) + 1e-12))
+        rms_smooth = 0.95*rms_smooth + 0.05*rms
+        peak_flag = 1 if (np.max(np.abs(x)) > 0.8) else 0
+
+        # gain toward target
+        gain = (agc_target / rms_smooth) if rms_smooth > 1e-6 else 1.0
+        gain = 0.98 + agc_strength * (gain - 1.0)
+
+        sampleRaw  = float(rms)
+        sampleSmth = float(min(rms * gain, 1.5))
+
+        # band energies -> uint8
+        bands = []
+        for i in range(16):
+            lo, hi = band_edges[i], band_edges[i+1]
+            mask = (freqs >= lo) & (freqs < hi)
+            val = float(mag[mask].mean()) if mask.any() else 0.0
+            val *= gain
+            # gentle compression + scale
+            bands.append(int(max(0, min(255, (val**0.5)*48))))
+
+        idx = int(np.argmax(mag))
+        FFT_Magnitude = float(mag[idx])
+        FFT_MajorPeak = float(freqs[idx])
+        return sampleRaw, sampleSmth, peak_flag, bands, FFT_Magnitude, FFT_MajorPeak
+
+    def cb(indata, frames, timeinfo, status):
+        nonlocal last_log
+        if status:
+            print("Audio status:", status, flush=True)
+        sR, sS, peak, bands, mag, hz = compute_features(indata.copy())
+        send_packet(sR, sS, peak, bands, mag, hz)
+        now = time.time()
+        if now - last_log > 1.0:
+            print(f"rms={sR:.3f} smth={sS:.3f} peak={peak} bands[min..max]={min(bands)}..{max(bands)} mag={mag:.2f} hz={hz:.0f}")
+            last_log = now
+
+    with sd.InputStream(
+        device=INPUT_DEVICE,
+        samplerate=SR,
+        channels=CH,
+        blocksize=BS,
+        dtype="float32",
+        callback=cb
+    ):
+        print("[AUDIO] Streaming… Ctrl+C to stop")
+        while True:
+            time.sleep(1)
+
+# -------------------------
+# Main
+# -------------------------
 if __name__ == "__main__":
-    print("WLED Audio Sync Test Tool")
-    print("=" * 40)
-    print("Make sure your WLED device is:")
-    print("1. Connected to the network")
-    print("2. Audio Reactive usermod is enabled")
-    print("3. Sync -> Audio Sync is set to 'Receive'")
-    print("4. You have selected an audio-reactive effect")
-    print("5. Device has been rebooted after changing sync settings")
-    print()
-    print("Starting tests automatically in 3 seconds...")
-    time.sleep(3)
-    
-    test_wled_connection()
+    print(f"WLED V2 test -> {HOST}:{PORT} | TEST_MODE={'1' if TEST_MODE else '0'}")
+    print("Packet size check:", PACK_SIZE, "bytes (expected 40)")
+    try:
+        if TEST_MODE:
+            test_sweep(fps=20, duration_sec=0)  # run until Ctrl+C
+        else:
+            run_audio()
+    except KeyboardInterrupt:
+        print("\nStopped.")

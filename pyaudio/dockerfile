@@ -16,4 +16,4 @@ COPY . /app
 WORKDIR /app
 
 
-CMD ["python", "wledAR.py"]
+CMD ["python", "wledtest.py"]
