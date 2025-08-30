@@ -18,4 +18,4 @@ COPY . /app
 WORKDIR /app
 
 
-CMD ["python", "-u", "wledAR.py"]
+CMD ["python", "-u", "wledAR2.py"]
