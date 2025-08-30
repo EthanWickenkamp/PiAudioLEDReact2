@@ -39,12 +39,12 @@ BAND_FLOOR    = float(os.getenv("BAND_FLOOR", "0.01"))    # 0.0..0.05; subtract 
 
 # ── AGC (auto gain control) for sampleSmth ──────────────────────────────────────
 AGC_TARGET   = float(os.getenv("AGC_TARGET", "0.6"))      # 0.3..0.8; higher = louder normalized level (more movement).
-AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.02"))   # 0.01..0.08; responsiveness of gain.
+AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.08"))   # 0.01..0.08; responsiveness of gain.
 
 # ── Beat detector (drives many peak-based effects) ──────────────────────────────
 PEAK_ATTACK  = float(os.getenv("PEAK_ATTACK",  "0.3"))    # 0.1..0.5; how fast envelope rises.
 PEAK_RELEASE = float(os.getenv("PEAK_RELEASE", "0.05"))   # 0.02..0.2; how fast it falls.
-PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.3"))    # 1.1..2.5; ratio above envelope to register a peak.
+PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.1"))    # 1.1..2.5; ratio above envelope to register a peak.
 PEAK_HOLD_MS = int(os.getenv("PEAK_HOLD_MS",   "120"))    # 40..200 ms; hold flag so effects see the beat.
 
 # ── Wire format (44 bytes) ─────────────────────────────────────────────────────
