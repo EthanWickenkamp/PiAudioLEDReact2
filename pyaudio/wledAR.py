@@ -28,24 +28,24 @@ CH = int(os.getenv("CHANNELS", "2"))             # 1 or 2. Stereo will be averag
 
 # ── Spectrum bands (GEQ) ───────────────────────────────────────────────────────
 # 16 log-spaced bands between F_MIN..F_MAX (Hz). Effects expect 16 bins.
-F_MIN = float(os.getenv("F_MIN", "40"))          # 20..80 typical. Lower emphasizes bass.
+F_MIN = float(os.getenv("F_MIN", "30"))          # 20..80 typical. Lower emphasizes bass.
 F_MAX = float(os.getenv("F_MAX", "10000"))       # 6k..16k typical. Higher adds more treble detail.
 BAND_EDGES = np.geomspace(F_MIN, F_MAX, 17)
 
 # Compression/scale from linear energy → 0..255 bins:
-BAND_COMP_EXP = float(os.getenv("BAND_COMP_EXP", "0.5"))   # 0.35..0.8; lower = stronger compression (more vivid).
-BAND_SCALE    = float(os.getenv("BAND_SCALE", "160"))      # 64..192; overall intensity of bins. ↑ if spectrum looks dim.
-BAND_FLOOR    = float(os.getenv("BAND_FLOOR", "0.015"))    # 0.0..0.05; subtract small floor to kill hiss/idle.
+BAND_COMP_EXP = float(os.getenv("BAND_COMP_EXP", "0.45"))   # 0.35..0.8; lower = stronger compression (more vivid).
+BAND_SCALE    = float(os.getenv("BAND_SCALE", "192"))      # 64..192; overall intensity of bins. ↑ if spectrum looks dim.
+BAND_FLOOR    = float(os.getenv("BAND_FLOOR", "0.02"))    # 0.0..0.05; subtract small floor to kill hiss/idle.
 
 # ── AGC (auto gain control) for sampleSmth ──────────────────────────────────────
-AGC_TARGET   = float(os.getenv("AGC_TARGET", "1.6"))       # 0.8..1.8; higher = louder normalized level (more movement).
-AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.06"))    # 0.01..0.1; responsiveness of gain smoothing.
+AGC_TARGET   = float(os.getenv("AGC_TARGET", "2.2"))       # 0.8..1.8; higher = louder normalized level (more movement).
+AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.08"))    # 0.01..0.1; responsiveness of gain smoothing.
 
 # ── Beat detector (drives many peak-based effects) ──────────────────────────────
 PEAK_ATTACK  = float(os.getenv("PEAK_ATTACK",  "0.3"))     # 0.1..0.5; how fast envelope rises.
 PEAK_RELEASE = float(os.getenv("PEAK_RELEASE", "0.05"))    # 0.02..0.2; how fast it falls.
-PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.25"))    # 1.1..2.5; ratio above envelope to register a peak.
-PEAK_HOLD_MS = int(os.getenv("PEAK_HOLD_MS",   "140"))     # 40..200 ms; hold flag so effects see the beat.
+PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.18"))    # 1.1..2.5; ratio above envelope to register a peak.
+PEAK_HOLD_MS = int(os.getenv("PEAK_HOLD_MS",   "160"))     # 40..200 ms; hold flag so effects see the beat.
 
 # ── Wire format (44 bytes) ─────────────────────────────────────────────────────
 HEADER = b"00002\x00"                      # 6 bytes including NUL
