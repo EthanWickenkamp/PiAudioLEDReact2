@@ -28,24 +28,24 @@ CH = int(os.getenv("CHANNELS", "2"))             # 1 or 2. Stereo will be averag
 
 # ── Spectrum bands (GEQ) ───────────────────────────────────────────────────────
 # 16 log-spaced bands between F_MIN..F_MAX (Hz). Effects expect 16 bins.
-F_MIN = float(os.getenv("F_MIN", "40"))          # 20..80 typical. Lowers emphasize bass.
+F_MIN = float(os.getenv("F_MIN", "40"))          # 20..80 typical. Lower emphasizes bass.
 F_MAX = float(os.getenv("F_MAX", "10000"))       # 6k..16k typical. Higher adds more treble detail.
 BAND_EDGES = np.geomspace(F_MIN, F_MAX, 17)
 
 # Compression/scale from linear energy → 0..255 bins:
-BAND_COMP_EXP = float(os.getenv("BAND_COMP_EXP", "0.5"))  # 0.35..0.8; lower = stronger compression (more vivid).
-BAND_SCALE    = float(os.getenv("BAND_SCALE", "128"))     # 64..192; overall intensity of bins.
-BAND_FLOOR    = float(os.getenv("BAND_FLOOR", "0.01"))    # 0.0..0.05; subtract small floor to kill hiss/idle.
+BAND_COMP_EXP = float(os.getenv("BAND_COMP_EXP", "0.5"))   # 0.35..0.8; lower = stronger compression (more vivid).
+BAND_SCALE    = float(os.getenv("BAND_SCALE", "160"))      # 64..192; overall intensity of bins. ↑ if spectrum looks dim.
+BAND_FLOOR    = float(os.getenv("BAND_FLOOR", "0.015"))    # 0.0..0.05; subtract small floor to kill hiss/idle.
 
 # ── AGC (auto gain control) for sampleSmth ──────────────────────────────────────
-AGC_TARGET   = float(os.getenv("AGC_TARGET", "0.6"))      # 0.3..0.8; higher = louder normalized level (more movement).
-AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.08"))   # 0.01..0.08; responsiveness of gain.
+AGC_TARGET   = float(os.getenv("AGC_TARGET", "1.6"))       # 0.8..1.8; higher = louder normalized level (more movement).
+AGC_STRENGTH = float(os.getenv("AGC_STRENGTH", "0.06"))    # 0.01..0.1; responsiveness of gain smoothing.
 
 # ── Beat detector (drives many peak-based effects) ──────────────────────────────
-PEAK_ATTACK  = float(os.getenv("PEAK_ATTACK",  "0.3"))    # 0.1..0.5; how fast envelope rises.
-PEAK_RELEASE = float(os.getenv("PEAK_RELEASE", "0.05"))   # 0.02..0.2; how fast it falls.
-PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.1"))    # 1.1..2.5; ratio above envelope to register a peak.
-PEAK_HOLD_MS = int(os.getenv("PEAK_HOLD_MS",   "120"))    # 40..200 ms; hold flag so effects see the beat.
+PEAK_ATTACK  = float(os.getenv("PEAK_ATTACK",  "0.3"))     # 0.1..0.5; how fast envelope rises.
+PEAK_RELEASE = float(os.getenv("PEAK_RELEASE", "0.05"))    # 0.02..0.2; how fast it falls.
+PEAK_THRESH  = float(os.getenv("PEAK_THRESH",  "1.25"))    # 1.1..2.5; ratio above envelope to register a peak.
+PEAK_HOLD_MS = int(os.getenv("PEAK_HOLD_MS",   "140"))     # 40..200 ms; hold flag so effects see the beat.
 
 # ── Wire format (44 bytes) ─────────────────────────────────────────────────────
 HEADER = b"00002\x00"                      # 6 bytes including NUL
@@ -56,9 +56,10 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 _frame = 0  # 0..255 rolling frame counter
 
 # Internal state
-_rms_smooth = 0.0
-_env = 0.0
+_rms_smooth = 0.0          # smoothed pre-AGC RMS
+_env = 0.0                 # beat envelope (on |x|)
 _last_peak_time = 0.0
+_agc_gain = 1.0            # smoothed AGC gain so sampleSmth approaches AGC_TARGET
 
 def send_packet(sampleRaw, sampleSmth, peak, bands, mag, hz):
     """Pack and send one 44B V2 telemetry frame."""
@@ -74,7 +75,7 @@ def send_packet(sampleRaw, sampleSmth, peak, bands, mag, hz):
 
 def compute_features(block):
     """Return (sampleRaw, sampleSmth, peak_flag, bands16, FFT_Magnitude, FFT_MajorPeak)."""
-    global _rms_smooth, _env, _last_peak_time
+    global _rms_smooth, _env, _last_peak_time, _agc_gain
 
     # mono mix
     x = block.mean(axis=1).astype(np.float32)
@@ -106,12 +107,14 @@ def compute_features(block):
     if (now - _last_peak_time) * 1000.0 < PEAK_HOLD_MS:
         peak_flag = 1
 
-    # AGC toward target
-    gain = (AGC_TARGET / _rms_smooth) if _rms_smooth > 1e-9 else 1.0
-    gain = 0.98 + AGC_STRENGTH * (gain - 1.0)
+    # AGC toward target (stateful smoothing so sampleSmth actually rises near AGC_TARGET)
+    target_gain = (AGC_TARGET / _rms_smooth) if _rms_smooth > 1e-9 else 1.0
+    alpha = max(0.0, min(1.0, AGC_STRENGTH))   # 0..1
+    _agc_gain = (1.0 - alpha) * _agc_gain + alpha * target_gain
+    gain = _agc_gain
 
     sampleRaw  = rms
-    sampleSmth = min(rms * gain, 2.0)  # arbitrary safety ceiling
+    sampleSmth = min(rms * gain, 3.0)  # higher ceiling so "avg>=1" is attainable
 
     # 16 GEQ bands
     bands = []
@@ -120,14 +123,17 @@ def compute_features(block):
         m = (freqs >= lo) & (freqs < hi)
         v = float(mag[m].mean()) if m.any() else 0.0
         v = max(0.0, v - BAND_FLOOR)   # noise floor
-        v *= gain                      # AGC scaling
+        v *= gain                      # tie spectrum to AGC too
         v = (v ** BAND_COMP_EXP) * BAND_SCALE
         bands.append(v)
 
-    # Dominant frequency (for hue-reactive modes)
-    idx = int(np.argmax(mag))
+    # Dominant frequency (for hue-reactive modes) — skip DC bin
+    if len(mag) > 1:
+        idx = int(np.argmax(mag[1:])) + 1
+    else:
+        idx = 0
     FFT_Magnitude = float(mag[idx])
-    FFT_MajorPeak = float(freqs[idx])
+    FFT_MajorPeak = float(freqs[idx]) if idx < len(freqs) else 0.0
 
     return sampleRaw, sampleSmth, peak_flag, bands, FFT_Magnitude, FFT_MajorPeak
 
