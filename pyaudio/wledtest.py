@@ -2,7 +2,7 @@
 import socket, struct, time, math, os
 
 HOST = os.getenv("WLED_HOST", "192.168.50.165")
-PORT = int(os.getenv("WLED_PORT", "21324"))
+PORT = int(os.getenv("WLED_PORT", "11988"))
 
 fmt = "<6s 2B f f B B 16B H f f"
 
