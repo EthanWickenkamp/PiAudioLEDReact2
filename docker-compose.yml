@@ -60,7 +60,9 @@ services:
     environment:
       IN_PCM: "hw:9,1"   # read from tap (same as audio-bridge input)
       SAMPLE_RATE: "44100"
-      FRAME_SIZE: "1024"
+      BLOCK_SIZE: "1024"
       WLED_HOST: "192.168.50.165"
       WLED_PORT: "11988"
+      V2_VARIANT: "44"      # 44 for the C++ layout you posted; 40 for "pure" V2
+      TEST_MODE: "0"
  
